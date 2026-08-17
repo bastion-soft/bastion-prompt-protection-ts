@@ -42,6 +42,20 @@ const guard = new Guard();
 
 beforeAll(async () => {
   await guard.protect("warmup");
+
+  // Fail once, clearly, if the weights never loaded. Without this the guard
+  // silently degrades to heuristics-only — by design — and every case below
+  // fails on its own terms, burying the real cause under a hundred assertion
+  // errors about labels and stages.
+  if (guard.modelVersion === null) {
+    throw new Error(
+      "Model weights did not load, so there is nothing to compare against. " +
+        "The guard degraded to heuristics-only. Look earlier in the log for a " +
+        '"bastion-prompt-protection: model … unavailable" warning with the ' +
+        "underlying cause (network, HuggingFace rate limit, corrupt cache). " +
+        "This is an environment failure, not a parity failure.",
+    );
+  }
 }, 600_000);
 
 describe("parity with the Python implementation", () => {

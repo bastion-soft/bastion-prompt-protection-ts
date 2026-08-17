@@ -55,7 +55,12 @@ jobs:
           key: hf-${{ hashFiles('test/fixtures/parity.json') }}
           restore-keys: hf-
 
+      # The default model is public, so this is not required. It is forwarded
+      # only because HuggingFace applies tighter rate limits to unauthenticated
+      # requests, and CI runners share address ranges. Unset is fine.
       - run: npm run test:parity
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
   package:
     name: package smoke test

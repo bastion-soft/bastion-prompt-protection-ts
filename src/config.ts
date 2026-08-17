@@ -45,6 +45,15 @@ export interface GuardConfigInit {
   maxInputChars?: number;
   cacheDir?: string;
   /**
+   * HuggingFace access token. Required only for gated repos — the
+   * `multilingual` preset; the default `tiny` model is public. Also lifts the
+   * tighter rate limits applied to unauthenticated requests.
+   *
+   * Defaults to `$HF_TOKEN`, then `$HUGGING_FACE_HUB_TOKEN` — the variables
+   * Python's `huggingface_hub` reads, which `@huggingface/hub` does not.
+   */
+  hfToken?: string;
+  /**
    * Point the detector at any HF repo id, bypassing the preset registry.
    * When set, this wins over `preset` — lets you run your own (or a
    * self-hosted) model without registering a preset.
@@ -69,6 +78,7 @@ export interface GuardConfig {
   enableBinary: boolean;
   maxInputChars: number;
   cacheDir?: string;
+  hfToken?: string;
   model?: string;
   licensePath?: string;
   requireLicense: boolean;
@@ -82,6 +92,9 @@ export function resolveConfig(init: GuardConfigInit = {}): GuardConfig {
     enableBinary: init.enableBinary ?? true,
     maxInputChars: init.maxInputChars ?? 8000,
     cacheDir: init.cacheDir,
+    // Unlike Python's huggingface_hub, @huggingface/hub does not read these
+    // itself, so resolve them here to keep the two behaving the same.
+    hfToken: init.hfToken ?? process.env.HF_TOKEN ?? process.env.HUGGING_FACE_HUB_TOKEN,
     model: init.model,
     licensePath: init.licensePath,
     requireLicense: init.requireLicense ?? false,

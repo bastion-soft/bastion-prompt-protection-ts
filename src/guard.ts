@@ -83,7 +83,7 @@ export class Guard {
 
     this.heuristics = this.config.enableHeuristics ? new HeuristicsStage() : null;
     this.binary = this.config.enableBinary
-      ? new BinaryStage(modelId(this.config, "binary"), this.config.cacheDir)
+      ? new BinaryStage(modelId(this.config, "binary"), this.config.cacheDir, this.config.hfToken)
       : null;
   }
 

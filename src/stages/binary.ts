@@ -25,8 +25,9 @@ export class BinaryStage {
   constructor(
     readonly modelId: string,
     cacheDir?: string,
+    hfToken?: string,
   ) {
-    this.loader = new OnnxModelLoader(modelId, cacheDir);
+    this.loader = new OnnxModelLoader(modelId, cacheDir, hfToken);
   }
 
   isAvailable(): Promise<boolean> {

@@ -44,9 +44,9 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run --exclude '**/parity.test.ts' --exclude '**/known-deviations.test.ts' --exclude '**/protect-chunked.test.ts'",
+    "test": "vitest run --exclude '**/parity.test.ts' --exclude '**/known-deviations.test.ts' --exclude '**/protect-chunked.test.ts' --exclude '**/loader-concurrency.test.ts'",
     "test:watch": "vitest",
-    "test:parity": "vitest run test/parity.test.ts test/known-deviations.test.ts test/protect-chunked.test.ts",
+    "test:parity": "vitest run test/parity.test.ts test/known-deviations.test.ts test/protect-chunked.test.ts test/loader-concurrency.test.ts",
     "test:all": "vitest run",
     "prepack": "npm run build"
   },

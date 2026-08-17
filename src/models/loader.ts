@@ -58,6 +58,7 @@ export class OnnxModelLoader {
   constructor(
     readonly modelId: string,
     private readonly cacheDir?: string,
+    private readonly hfToken?: string,
   ) {}
 
   /**
@@ -93,7 +94,8 @@ export class OnnxModelLoader {
   }
 
   private load(): Promise<ModelArtifact> {
-    // Collapse concurrent first-calls onto a single download.
+    // Collapse concurrent first-calls onto a single download. This handles
+    // concurrency *within* a process; `doLoad` handles it across processes.
     this.loadPromise ??= this.doLoad();
     return this.loadPromise;
   }
@@ -109,12 +111,14 @@ export class OnnxModelLoader {
     // them is the repo commit. Pinning an explicit 40-char SHA puts everything
     // under `snapshots/<sha>/`, matching Python's `snapshot_download` layout —
     // which is also what `modelVersion` is derived from.
-    const info = await modelInfo({ name: this.modelId, additionalFields: ["sha"] });
+    const auth = this.hfToken ? { accessToken: this.hfToken } : {};
+
+    const info = await modelInfo({ name: this.modelId, additionalFields: ["sha"], ...auth });
     const sha = info.sha;
     if (!sha) throw new Error(`could not resolve commit sha for ${this.modelId}`);
 
     const allFiles: string[] = [];
-    for await (const entry of listFiles({ repo, revision: sha, recursive: true })) {
+    for await (const entry of listFiles({ repo, revision: sha, recursive: true, ...auth })) {
       if (entry.type === "file") allFiles.push(entry.path);
     }
 
@@ -126,11 +130,12 @@ export class OnnxModelLoader {
 
     const downloaded = new Map<string, string>();
     for (const file of wanted) {
-      const localPath = await downloadFileToCacheDir({
+      const localPath = await downloadWithRetryImpl({
         repo,
         path: file,
         revision: sha,
         ...(this.cacheDir ? { cacheDir: this.cacheDir } : {}),
+        ...auth,
       });
       downloaded.set(file, localPath);
     }
@@ -175,6 +180,39 @@ export class OnnxModelLoader {
       inputNames: [...session.inputNames],
     };
   }
+}
+
+/** Download one file, tolerating a concurrent process warming the same cache. */
+async function downloadWithRetryImpl(
+  params: Parameters<typeof downloadFileToCacheDir>[0],
+): Promise<string> {
+  // The hub client downloads to `<blob>.incomplete` and then renames it, so two
+  // processes warming the same cold cache collide: the slower one finds the temp
+  // file already gone and fails with `ENOENT … rename`. That happens whenever
+  // several workers start at once, and it leaves the guard silently degraded to
+  // heuristics-only.
+  //
+  // Retrying fixes it, but the backoff has to outlast the *other* download —
+  // the quantized model is ~87 MB — so this grows to several seconds rather than
+  // giving up in milliseconds. Retries are per-file, so losing one race does not
+  // restart the whole set.
+  const MAX_ATTEMPTS = 5;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await downloadFileToCacheDir(params);
+    } catch (err) {
+      lastError = err;
+      if (attempt === MAX_ATTEMPTS) break;
+      // Not unref'd: this timer is what we are waiting on, and letting the loop
+      // go idle would exit the process mid-retry.
+      const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 8000);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  throw lastError;
 }
 
 async function loadLabels(labelsPath: string): Promise<string[]> {

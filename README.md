@@ -61,6 +61,7 @@ the guard degrades to heuristics-only with a warning rather than throwing.
 | `enableBinary`                     |      `true` | Run the ONNX stage                                           |
 | `maxInputChars`                    |      `8000` | Characters kept before detection                             |
 | `cacheDir`                         |           — | Override the model cache location                            |
+| `hfToken`                          |           — | HuggingFace token; defaults to `$HF_TOKEN`                   |
 | `licensePath` / `requireLicense`   | — / `false` | Offline commercial-license checks                            |
 
 `protect(prompt)` resolves to
@@ -175,6 +176,10 @@ fire-and-forget: it never adds latency to, or throws into, the detection path.
 
 The commercial model extends coverage to seven languages at a lower
 false-positive rate. Request a quote at <https://bastionsoft.com>.
+
+The commercial weights are gated on HuggingFace, so downloading them needs a
+token from an account granted access — set `$HF_TOKEN` or pass `hfToken`. The
+free `tiny` model is public and needs no token.
 
 ```ts
 const guard = new Guard({ preset: "multilingual", requireLicense: true });
