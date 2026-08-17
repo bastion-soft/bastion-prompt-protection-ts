@@ -3,6 +3,19 @@
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/);
 this project follows [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] — 2026-08-17
+
+No runtime changes — the published code is identical to `0.1.0`. This release
+exists to exercise the automated publish pipeline, which `0.1.0` could not use
+(npm requires a package to exist before a trusted publisher can be attached, so
+the first version had to be published by hand).
+
+### Changed
+
+- CI now also runs on Windows, alongside Linux and macOS.
+- Release docs: publishing `0.1.0` by hand means no GitHub Release should be
+  created for it, or the workflow fires and fails on the existing version.
+
 ## [0.1.0] — 2026-08-17
 
 First release: the Bastion prompt-injection detection engine for Node.js.

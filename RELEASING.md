@@ -64,6 +64,13 @@ private publish fails without a paid plan.
 
 > Everything after this is automated. This is the only time you publish by hand.
 
+> **Do not create a GitHub Release for this first version.** `publish.yml` fires
+> on a published release and would try to publish `0.1.0` a second time, which
+> npm rejects with a 403 — the version already exists and npm never allows
+> republishing one. Tag it locally if you want the marker
+> (`git tag v0.1.0 && git push --tags`), but leave the GitHub Release for `0.1.1`
+> onwards, which is the first version the workflow actually publishes.
+
 ## Step 3 — configure trusted publishing
 
 Now that the package exists, go to
@@ -156,8 +163,7 @@ linking back to the exact workflow run that produced the tarball.
 
 ## A note on the version number
 
-The first release is `0.1.0`, not `1.3.5`. The API is a faithful port of the
-Python package's 1.3.5, but this package has no release history of its own and
-the ONNX path is newly written, so it starts at `0.1.x` and moves to `1.0.0`
-once it has real-world mileage. The Python and TypeScript version numbers are
-not intended to track each other.
+This package starts at `0.1.0` rather than tracking our Python package's
+`1.3.5`. It shares the model and the thresholds, but the runtime is new code
+with no release history of its own, so it earns `1.0.0` after real-world
+mileage. The two version numbers are independent and not meant to line up.
