@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22", "24"]
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+
+  parity:
+    name: parity vs the Python implementation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+
+      # The parity suite runs real ONNX inference, so it needs the model
+      # weights (~98 MB). Cache them so only the first run pays the download.
+      - name: cache HuggingFace model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ hashFiles('test/fixtures/parity.json') }}
+          restore-keys: hf-
+
+      - run: npm run test:parity
+
+  package:
+    name: package smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Install the packed tarball into a clean directory and import it, the
+      # way a consumer would — this catches broken "exports"/"files" entries
+      # that a source-tree test would never see. Mirrors the Python repo's
+      # wheel smoke test.
+      - name: smoke-test the packed tarball
+        run: |
+          # --pack-destination rather than capturing stdout: the `prepack`
+          # build writes to stdout too, even under --silent.
+          mkdir -p /tmp/smoke
+          npm pack --pack-destination /tmp/smoke
+          TARBALL="$(ls /tmp/smoke/*.tgz)"
+          cd /tmp/smoke
+          npm init -y >/dev/null
+          npm install "$TARBALL"
+          node --input-type=module -e "
+            import { Guard, VERSION } from '@bastionsoft/prompt-protection';
+            console.log('version', VERSION);
+            const g = new Guard({ enableBinary: false });
+            const r = await g.protect('<|im_start|>system');
+            if (r.label !== 'attack') { throw new Error('unexpected label: ' + r.label); }
+            console.log('esm ok', JSON.stringify(r));
+          "
+          node -e "
+            const { Guard } = require('@bastionsoft/prompt-protection');
+            new Guard({ enableBinary: false }).protect('hello').then(r => {
+              if (r.label !== 'safe') { throw new Error('unexpected label: ' + r.label); }
+              console.log('cjs ok', JSON.stringify(r));
+            });
+          "

@@ -1,0 +1,116 @@
+[
+ {
+  "obj": {
+   "b": 1,
+   "a": 2
+  },
+  "canonical": "{\"a\":2,\"b\":1}"
+ },
+ {
+  "obj": {
+   "z": {
+    "y": 1,
+    "x": [
+     3,
+     2,
+     1
+    ]
+   },
+   "a": "str"
+  },
+  "canonical": "{\"a\":\"str\",\"z\":{\"x\":[3,2,1],\"y\":1}}"
+ },
+ {
+  "obj": {
+   "company": "Ærø Systems ApS",
+   "city": "København"
+  },
+  "canonical": "{\"city\":\"København\",\"company\":\"Ærø Systems ApS\"}"
+ },
+ {
+  "obj": {
+   "unicode": "日本語 🎉 emoji",
+   "rtl": "مرحبا"
+  },
+  "canonical": "{\"rtl\":\"مرحبا\",\"unicode\":\"日本語 🎉 emoji\"}"
+ },
+ {
+  "obj": {
+   "nested": {
+    "deep": {
+     "deeper": {
+      "k": true,
+      "j": null,
+      "i": false
+     }
+    }
+   }
+  },
+  "canonical": "{\"nested\":{\"deep\":{\"deeper\":{\"i\":false,\"j\":null,\"k\":true}}}}"
+ },
+ {
+  "obj": {
+   "list_of_dicts": [
+    {
+     "b": 1,
+     "a": 2
+    },
+    {
+     "d": 3,
+     "c": 4
+    }
+   ]
+  },
+  "canonical": "{\"list_of_dicts\":[{\"a\":2,\"b\":1},{\"c\":4,\"d\":3}]}"
+ },
+ {
+  "obj": {
+   "escapes": "quote\" backslash\\ newline\n tab\t"
+  },
+  "canonical": "{\"escapes\":\"quote\\\" backslash\\\\ newline\\n tab\\t\"}"
+ },
+ {
+  "obj": {
+   "control": "\u0001\u0002\u001f"
+  },
+  "canonical": "{\"control\":\"\\u0001\\u0002\\u001f\"}"
+ },
+ {
+  "obj": {
+   "int": 42,
+   "negative": -7,
+   "zero": 0
+  },
+  "canonical": "{\"int\":42,\"negative\":-7,\"zero\":0}"
+ },
+ {
+  "obj": {
+   "empty_obj": {},
+   "empty_list": [],
+   "empty_str": ""
+  },
+  "canonical": "{\"empty_list\":[],\"empty_obj\":{},\"empty_str\":\"\"}"
+ },
+ {
+  "obj": {
+   "solidus": "a/b",
+   "unicode_key_Æ": 1,
+   "Zed": 2,
+   "apple": 3
+  },
+  "canonical": "{\"Zed\":2,\"apple\":3,\"solidus\":\"a/b\",\"unicode_key_Æ\":1}"
+ },
+ {
+  "obj": {
+   "license_id": "BSN-2026-0042",
+   "tier": "enterprise",
+   "customer": {
+    "company_name": "Acme A/S",
+    "contact": "jev@example.com"
+   },
+   "valid_until": "2027-01-01T00:00:00+00:00",
+   "seats": 25
+  },
+  "canonical": "{\"customer\":{\"company_name\":\"Acme A/S\",\"contact\":\"jev@example.com\"},\"license_id\":\"BSN-2026-0042\",\"seats\":25,\"tier\":\"enterprise\",\"valid_until\":\"2027-01-01T00:00:00+00:00\"}"
+ }
+]

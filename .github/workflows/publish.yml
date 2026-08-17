@@ -1,0 +1,86 @@
+# Publishes to npm using Trusted Publishing (OIDC) — no NPM_TOKEN secret.
+#
+# One-time setup on npmjs.com, under the package's Settings → Trusted Publisher:
+#   Repository: bastion-soft/bastion-prompt-protection-ts
+#   Workflow:   publish.yml
+#   Environment: npm
+#
+# Mirrors the Python repo's PyPI trusted-publishing workflow.
+name: publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build and verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+
+      - name: verify tag matches package version
+        # Both package.json and src/version.ts carry the version; the tag must
+        # agree with both, so a release can never ship a mislabelled VERSION.
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          SRC_VERSION="v$(node -p "require('fs').readFileSync('src/version.ts','utf8').match(/VERSION = \"([^\"]+)\"/)[1]")"
+          echo "tag=$TAG package.json=$PKG_VERSION version.ts=$SRC_VERSION"
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "::error::tag $TAG does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+          if [ "$TAG" != "$SRC_VERSION" ]; then
+            echo "::error::tag $TAG does not match src/version.ts $SRC_VERSION"
+            exit 1
+          fi
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: publish to npm
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@bastionsoft/prompt-protection
+    permissions:
+      contents: read
+      id-token: write # required for OIDC trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # npm >= 11.5.1 performs the OIDC exchange automatically; no token needed.
+      - name: update npm
+        run: npm install -g npm@latest
+
+      - name: publish
+        run: npm publish --provenance --access public
