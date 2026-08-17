@@ -1,0 +1,7 @@
+# Check out LF everywhere. Windows runners set core.autocrlf=true, which would
+# otherwise rewrite every file to CRLF on checkout and make `prettier --check`
+# fail on the whole tree.
+* text=auto eol=lf
+
+# Fixtures are compared byte-for-byte; never let git touch them.
+*.json -text
