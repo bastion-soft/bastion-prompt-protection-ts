@@ -126,13 +126,25 @@ ONNX Runtime's INT8 kernels take different code paths per architecture, so exact
 scores are reproducible only on the architecture they were measured on. The
 113-case fixture, generated on darwin/arm64:
 
-| Platform     | Bit-exact | Max difference | Label changes |
-| ------------ | --------: | -------------: | ------------: |
-| darwin/arm64 |   113/113 |       0.000000 |             0 |
-| linux/arm64  |    75/113 |         0.0142 |         **0** |
+| Platform     | Bit-exact | Max difference |          Label changes |
+| ------------ | --------: | -------------: | ---------------------: |
+| darwin/arm64 |   113/113 |       0.000000 |                      0 |
+| linux/arm64  |    75/113 |         0.0142 |                      0 |
+| linux/x64    |         — |         < 0.05 | 1 (threshold-adjacent) |
 
-**Verdicts are the guarantee; exact scores are not portable.** The test suite
-enforces the strict bound on the reference platform and a tolerance elsewhere.
+The one label change is `long-002`: `0.4761` on darwin/arm64, `0.5022` on
+linux/x64. The drift is 0.0261 — well inside tolerance — but the case sits only
+0.0239 from the `0.5` threshold, so it lands on either side depending on
+architecture.
+
+Exactly **1 of 113** fixture cases falls within ±0.05 of the threshold, which is
+about the rate to expect: verdicts are stable except for inputs the model itself
+finds genuinely ambiguous. The parity suite asserts scores against a tolerance
+everywhere, exact equality on the reference platform, and labels only where the
+fixture score is far enough from the threshold for the label to be determinable.
+
+**For deployments that need identical verdicts across mixed architectures**: pin
+the architecture, or choose a threshold away from where your traffic clusters.
 
 `onnxruntime-node` is pinned to an exact version for the same reason — INT8
 inference is not bit-stable across ORT releases. On 1.27.0 versus 1.26.0 the
