@@ -3,6 +3,15 @@
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/);
 this project follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-08-20
+
+### Changed
+
+- **Breaking:** `chunkContent()` and `Guard.protectChunked()` now use a
+  fixed-width sliding window instead of sentence/line boundary splitting.
+  `ChunkOptions` is `{ maxLen?, overlap? }` (defaults `1024` / `50`); `minLen`
+  is removed. Whitespace-only input is trimmed and yields `[""]`.
+
 ## [0.1.1] — 2026-08-17
 
 No runtime changes — the published code is identical to `0.1.0`. This release

@@ -80,8 +80,8 @@ text is not weakly weighted — it is not read at all, so an injection at offset
 model _does_ read also gets diluted: a short payload inside a long benign
 passage is scored down.
 
-For anything document-shaped, use `protectChunked()`. It splits on sentence and
-line boundaries and takes the worst verdict:
+For anything document-shaped, use `protectChunked()`. It splits content into
+fixed-width sliding windows and takes the worst verdict:
 
 ```ts
 const result = await guard.protectChunked(document);
@@ -90,9 +90,8 @@ const result = await guard.protectChunked(document);
 
 | Option      |    Default | Meaning                                                     |
 | ----------- | ---------: | ----------------------------------------------------------- |
-| `minLen`    |      `120` | Merge lines/sentences until a chunk reaches this many chars |
-| `maxLen`    |      `400` | Split any single line/sentence longer than this             |
-| `overlap`   |        `0` | Repeat this many chars of the previous chunk                |
+| `maxLen`    |     `1024` | Sliding-window length in characters                         |
+| `overlap`   |       `50` | Characters repeated from the previous window                |
 | `maxChunks` | _no limit_ | Stop after this many chunks                                 |
 
 It stops at the first chunk over the threshold, so **clean content is the
