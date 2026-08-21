@@ -59,7 +59,8 @@ the guard degrades to heuristics-only with a warning rather than throwing.
 | `thresholds.heuristicShortCircuit` |      `0.95` | Heuristic score at or above this skips the model             |
 | `enableHeuristics`                 |      `true` | Run the regex stage                                          |
 | `enableBinary`                     |      `true` | Run the ONNX stage                                           |
-| `maxInputChars`                    |      `8000` | Characters kept before detection                             |
+| `maxInputChars`                    |    `262144` | Total input bound before token windowing (characters)        |
+| `overlapTokens`                    |        `64` | Content-token overlap between consecutive windows            |
 | `cacheDir`                         |           — | Override the model cache location                            |
 | `hfToken`                          |           — | HuggingFace token; defaults to `$HF_TOKEN`                   |
 | `licensePath` / `requireLicense`   | — / `false` | Offline commercial-license checks                            |
@@ -72,34 +73,33 @@ Also on the instance: `guard.sdkVersion`, `guard.modelVersion` (7-character
 model-snapshot id, `null` until first use — worth recording in audit logs), and
 `guard.licenseStatus()`.
 
-### `protectChunked(prompt, options?)` — for documents and tool results
+### `protect(prompt, options?)` — documents and tool results
 
-The classifier reads at most **512 tokens (~2,000 characters)**. Beyond that,
-text is not weakly weighted — it is not read at all, so an injection at offset
-3,000 of a 20 KB file scores exactly the same as the clean file. Content the
-model _does_ read also gets diluted: a short payload inside a long benign
-passage is scored down.
+The classifier reads at most **512 tokens**. Beyond that, text is not weakly
+weighted — it is not read at all, so an injection buried in a long file scores
+the same as the clean file unless the input is windowed.
 
-For anything document-shaped, use `protectChunked()`. It splits content into
-fixed-width sliding windows and takes the worst verdict:
+By default `protect()` splits content into overlapping **token-exact** sliding
+windows and takes the worst verdict:
 
 ```ts
-const result = await guard.protectChunked(document);
-// { risk, label, isAttack, chunksScanned, chunksTotal, … }
+const result = await guard.protect(document);
+// { risk, label, isAttack, chunksScanned, chunksTotal, chunksTotalExact, … }
 ```
 
-| Option      |    Default | Meaning                                                     |
-| ----------- | ---------: | ----------------------------------------------------------- |
-| `maxLen`    |     `1024` | Sliding-window length in characters                         |
-| `overlap`   |       `50` | Characters repeated from the previous window                |
-| `maxChunks` | _no limit_ | Stop after this many chunks                                 |
+| Option          |    Default | Meaning                                          |
+| --------------- | ---------: | ------------------------------------------------ |
+| `overlapTokens` |       `64` | Content tokens repeated from the previous window |
+| `maxChunks`     | _no limit_ | Stop after this many windows                     |
 
-It stops at the first chunk over the threshold, so **clean content is the
-expensive case** — every chunk is scanned. Budget ~1.2 s per 20 KB. Compare
-`chunksScanned` with `chunksTotal` to tell whether the whole input was covered.
+Pass `{ maxChunks: 1 }` for Python-parity single-window mode (first 512 tokens
+only). It stops at the first window over the threshold, so **clean content is
+the expensive case** — every window is scanned. Compare `chunksScanned` with
+`chunksTotal` to tell whether the whole input was covered; when
+`chunksTotalExact` is false, `chunksTotal` is a density-based estimate.
 
-Defaults are exported as `DEFAULT_CHUNK_OPTIONS`, along with
-`MODEL_TOKEN_WINDOW` and the `chunkContent()` splitter itself.
+Constants are exported as `MODEL_TOKEN_WINDOW`, `CONTENT_TOKEN_WINDOW`,
+`DEFAULT_TOKEN_OVERLAP`, and `DEFAULT_SLAB_CHARS`.
 
 > **On document content, raise the threshold.** The `0.5` default is calibrated
 > for chat prompts. On documents and tool results this model is materially more

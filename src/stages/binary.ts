@@ -1,14 +1,9 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { TemperatureScaler } from "../calibration.js";
+import { NEUTRAL_RISK, type WindowOptions } from "../config.js";
+import { type Encoding, type TokenWindow } from "../models/tokenizer.js";
 import { OnnxModelLoader } from "../models/loader.js";
-
-/**
- * Returned when model weights are not yet available. Sits exactly between
- * safe_below and attack_above so it routes to whichever next stage is enabled
- * without falsely classifying anything.
- */
-export const NEUTRAL_RISK = 0.5;
 
 export interface BinaryPrediction {
   risk: number;
@@ -50,16 +45,22 @@ export class BinaryStage {
     }
 
     const artifact = await this.loader.artifact();
+    await this.ensureCalibration(artifact.modelDir);
+    return this.predictEncoded(artifact.tokenizer.encode(text), artifact);
+  }
 
-    // Lazy-load temperature.json on first use. Done here (not in the
-    // constructor) because the snapshot directory only exists after the loader
-    // has fetched the model.
-    if (!this.calibrationLoaded) {
-      this.scaler = await loadTemperature(artifact.modelDir);
-      this.calibrationLoaded = true;
+  async predictEncoded(
+    encoding: Encoding,
+    artifact?: Awaited<ReturnType<OnnxModelLoader["artifact"]>>,
+  ): Promise<BinaryPrediction> {
+    if (!(await this.isAvailable())) {
+      return { risk: NEUTRAL_RISK, available: false };
     }
 
-    const { ids, attentionMask } = artifact.tokenizer.encode(text);
+    const loaded = artifact ?? (await this.loader.artifact());
+    await this.ensureCalibration(loaded.modelDir);
+
+    const { ids, attentionMask } = encoding;
 
     const ort = await import("onnxruntime-node");
     const dims = [1, ids.length];
@@ -67,12 +68,12 @@ export class BinaryStage {
       input_ids: new ort.Tensor("int64", BigInt64Array.from(ids, BigInt), dims),
       attention_mask: new ort.Tensor("int64", BigInt64Array.from(attentionMask, BigInt), dims),
     };
-    if (artifact.inputNames.includes("token_type_ids")) {
+    if (loaded.inputNames.includes("token_type_ids")) {
       feeds.token_type_ids = new ort.Tensor("int64", new BigInt64Array(ids.length), dims);
     }
 
-    const outputs = await artifact.session.run(feeds);
-    const first = outputs[artifact.session.outputNames[0] as string];
+    const outputs = await loaded.session.run(feeds);
+    const first = outputs[loaded.session.outputNames[0] as string];
     const raw = Array.from(first?.data as Float32Array, Number);
 
     // Apply temperature calibration to the raw logits before softmax.
@@ -82,6 +83,18 @@ export class BinaryStage {
     const attackProb = probs.length > 1 ? (probs[1] as number) : (probs[0] as number);
 
     return { risk: attackProb, available: true };
+  }
+
+  async *encodeWindows(text: string, options: WindowOptions = {}): AsyncGenerator<TokenWindow> {
+    if (!(await this.isAvailable())) return;
+    const artifact = await this.loader.artifact();
+    yield* artifact.tokenizer.windows(text, options);
+  }
+
+  private async ensureCalibration(modelDir: string): Promise<void> {
+    if (this.calibrationLoaded) return;
+    this.scaler = await loadTemperature(modelDir);
+    this.calibrationLoaded = true;
   }
 }
 

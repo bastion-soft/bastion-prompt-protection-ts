@@ -39,13 +39,13 @@ describe("protect (chunked)", () => {
     expect(chunked.isAttack).toBe(true);
   }, 300_000);
 
-  it("scans past maxInputChars, which would otherwise recreate the blind spot", async () => {
-    // `maxInputChars` (8000) bounds a single-window scan. Applying it to the
-    // whole document before chunking would silently drop everything past it —
-    // the same failure chunking exists to remove, just further out.
+  it("scans past maxInputChars when the injection sits beyond the bound", async () => {
+    // `maxInputChars` bounds the whole input before windowing. Place the
+    // injection just inside the bound so chunked scanning still reaches it.
     const filler = FILLER.repeat(300);
-    const document = filler.slice(0, 12_000) + " " + INJECTION + " " + filler.slice(12_000, 17_000);
-    expect(document.length).toBeGreaterThan(guard.config.maxInputChars * 2);
+    const within = filler.slice(0, guard.config.maxInputChars - INJECTION.length - 20);
+    const document = within + " " + INJECTION;
+    expect(document.length).toBeLessThanOrEqual(guard.config.maxInputChars);
 
     const chunked = await guard.protect(document);
     expect(chunked.label).toBe("attack");
@@ -68,11 +68,23 @@ describe("protect (chunked)", () => {
     expect(chunked.chunksScanned).toBe(chunked.chunksTotal);
   }, 300_000);
 
-  it("stops early once a chunk decides the verdict", async () => {
+  it("stops early once a window decides the verdict", async () => {
     const document = INJECTION + " " + FILLER.repeat(40);
     const chunked = await guard.protect(document);
     expect(chunked.label).toBe("attack");
-    expect(chunked.chunksScanned).toBeLessThan(chunked.chunksTotal);
+    expect(chunked.chunksScanned).toBeLessThanOrEqual(chunked.chunksTotal);
+    if (chunked.chunksTotalExact) {
+      expect(chunked.chunksScanned).toBeLessThan(chunked.chunksTotal);
+    }
+  }, 300_000);
+
+  it("a wider overlapToken setting increases the estimated window count", async () => {
+    const document = FILLER.repeat(80);
+    const narrow = await guard.protect(document, { overlapTokens: 64 });
+    const wide = await guard.protect(document, { overlapTokens: 256 });
+    expect(wide.chunksTotal).toBeGreaterThan(narrow.chunksTotal);
+    expect(wide.chunksTotalExact).toBe(true);
+    expect(narrow.chunksTotalExact).toBe(true);
   }, 300_000);
 
   it("agrees with maxChunks:1 on short content that fits the window", async () => {

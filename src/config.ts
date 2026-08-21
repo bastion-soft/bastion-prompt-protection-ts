@@ -36,8 +36,70 @@ export const DEFAULT_THRESHOLDS: Readonly<Thresholds> = Object.freeze({
   heuristicShortCircuit: 0.95,
 });
 
-export const DEFAULT_MAX_INPUT = 2048;
-export const DEFAULT_WINDOW_OVERLAP = 50;
+/** Total input length bound before token windowing (characters, not tokens). */
+export const DEFAULT_MAX_INPUT = 65_536;
+
+// ── Token window defaults ───────────────────────────────────────────────────────
+
+/** The classifier reads at most this many tokens including special tokens. */
+export const MODEL_TOKEN_WINDOW = 512;
+
+/** `[CLS]` and `[SEP]` reserved by the post-processor. */
+export const SPECIAL_TOKEN_BUDGET = 2;
+
+/** Content tokens per window after special tokens are attached. */
+export const CONTENT_TOKEN_WINDOW = MODEL_TOKEN_WINDOW - SPECIAL_TOKEN_BUDGET;
+
+/** Default overlap between consecutive windows, in content tokens. */
+export const DEFAULT_TOKEN_OVERLAP = 64;
+
+/**
+ * Maximum characters per tokenization slab. Keeps `@huggingface/tokenizers`
+ * linear on multi-kilobyte input; whitespace-aligned cuts preserve the same
+ * token stream as a single `encode()` call.
+ */
+export const DEFAULT_SLAB_CHARS = 512;
+
+export type WindowOptions = {
+  /** Model window including special tokens. Defaults to `MODEL_TOKEN_WINDOW`. */
+  windowTokens?: number;
+  /** Content tokens repeated from the previous window. Defaults to `DEFAULT_TOKEN_OVERLAP`. */
+  overlapTokens?: number;
+  /** Characters per tokenization slab. Defaults to `DEFAULT_SLAB_CHARS`. */
+  slabChars?: number;
+};
+
+/** Estimate how many windows cover a token stream of the given length. */
+export function estimateWindowCount(
+  tokenCount: number,
+  contentWindow = CONTENT_TOKEN_WINDOW,
+  overlapTokens = DEFAULT_TOKEN_OVERLAP,
+): number {
+  if (tokenCount <= 0) return 0;
+  if (tokenCount <= contentWindow) return 1;
+  const step = Math.max(1, contentWindow - overlapTokens);
+  return Math.ceil((tokenCount - contentWindow) / step) + 1;
+}
+
+// ── Output vocabulary ─────────────────────────────────────────────────────────
+
+export const LABEL_SAFE = "safe";
+export const LABEL_ATTACK = "attack";
+
+export const STAGE_HEURISTICS = "heuristics";
+export const STAGE_BINARY = "binary";
+
+export type Label = typeof LABEL_SAFE | typeof LABEL_ATTACK;
+export type Stage = typeof STAGE_HEURISTICS | typeof STAGE_BINARY;
+
+// ── Stage sentinels ───────────────────────────────────────────────────────────
+
+/**
+ * Returned when model weights are not yet available. Sits exactly between
+ * safe_below and attack_above so it routes to whichever next stage is enabled
+ * without falsely classifying anything.
+ */
+export const NEUTRAL_RISK = 0.5;
 
 /** User-supplied guard options. Every field is optional. */
 export interface GuardConfigInit {
@@ -45,8 +107,10 @@ export interface GuardConfigInit {
   thresholds?: Partial<Thresholds>;
   enableHeuristics?: boolean;
   enableBinary?: boolean;
+  /** Total input length bound before windowing (characters). Defaults to `DEFAULT_MAX_INPUT`. */
   maxInputChars?: number;
-  windowOverlap?: number;
+  /** Content-token overlap between consecutive windows. Defaults to `DEFAULT_TOKEN_OVERLAP`. */
+  overlapTokens?: number;
   cacheDir?: string;
   /**
    * HuggingFace access token. Required only for gated repos — the
@@ -89,7 +153,7 @@ export interface GuardConfig {
   enableHeuristics: boolean;
   enableBinary: boolean;
   maxInputChars: number;
-  windowOverlap: number;
+  overlapTokens: number;
   cacheDir?: string;
   hfToken?: string;
   model?: string;
@@ -105,7 +169,7 @@ export function resolveConfig(init: GuardConfigInit = {}): GuardConfig {
     enableHeuristics: init.enableHeuristics ?? true,
     enableBinary: init.enableBinary ?? true,
     maxInputChars: init.maxInputChars ?? DEFAULT_MAX_INPUT,
-    windowOverlap: init.windowOverlap ?? DEFAULT_WINDOW_OVERLAP,
+    overlapTokens: init.overlapTokens ?? DEFAULT_TOKEN_OVERLAP,
     cacheDir: init.cacheDir,
     // Unlike Python's huggingface_hub, @huggingface/hub does not read these
     // itself, so resolve them here to keep the two behaving the same.

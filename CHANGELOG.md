@@ -3,6 +3,22 @@
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/);
 this project follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-08-21
+
+### Changed
+
+- **Breaking:** Replaced character-space chunking with token-exact sliding
+  windows. `protect()` now tokenizes via whitespace-aligned character slabs and
+  slides exactly 510 content tokens per 512-token model window.
+- **Breaking:** Removed `chunkContent()`, `ChunkOptions`, `DEFAULT_CHUNK_OPTIONS`,
+  and `MIN_OVERLAP` from the public API.
+- **Breaking:** Renamed `windowOverlap` to `overlapTokens` (characters → content
+  tokens; default `64` instead of `50`).
+- **Breaking:** `maxInputChars` default is now `262144` and bounds the whole
+  input before windowing, not each window individually.
+- `ChunkedGuardResult` adds `chunksTotalExact`. `chunksTotal` may be a
+  density-based estimate until the token stream is fully drained.
+
 ## [0.2.0] — 2026-08-20
 
 ### Changed

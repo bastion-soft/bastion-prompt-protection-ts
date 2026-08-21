@@ -12,16 +12,16 @@ Consumers and internal modules import from `config.ts`; the public API surface i
 
 Constants that move:
 
-| Constant | Current home | Moves to |
-|---|---|---|
-| `MIN_OVERLAP` | `chunking.ts` | `config.ts` |
-| `MODEL_TOKEN_WINDOW` | `chunking.ts` | `config.ts` |
-| `DEFAULT_CHUNK_OPTIONS` | `chunking.ts` | `config.ts` |
-| `LABEL_SAFE` | `guard.ts` | `config.ts` |
-| `LABEL_ATTACK` | `guard.ts` | `config.ts` |
-| `STAGE_HEURISTICS` | `guard.ts` | `config.ts` |
-| `STAGE_BINARY` | `guard.ts` | `config.ts` |
-| `NEUTRAL_RISK` | `stages/binary.ts` | `config.ts` |
+| Constant                | Current home       | Moves to    |
+| ----------------------- | ------------------ | ----------- |
+| `MIN_OVERLAP`           | `chunking.ts`      | `config.ts` |
+| `MODEL_TOKEN_WINDOW`    | `chunking.ts`      | `config.ts` |
+| `DEFAULT_CHUNK_OPTIONS` | `chunking.ts`      | `config.ts` |
+| `LABEL_SAFE`            | `guard.ts`         | `config.ts` |
+| `LABEL_ATTACK`          | `guard.ts`         | `config.ts` |
+| `STAGE_HEURISTICS`      | `guard.ts`         | `config.ts` |
+| `STAGE_BINARY`          | `guard.ts`         | `config.ts` |
+| `NEUTRAL_RISK`          | `stages/binary.ts` | `config.ts` |
 
 Out of scope (stay where they are):
 

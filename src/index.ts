@@ -1,32 +1,29 @@
+export { Guard, type ChunkedGuardResult, type GuardResult, type ProtectOptions } from "./guard.js";
+
 export {
-  Guard,
+  CONTENT_TOKEN_WINDOW,
+  DEFAULT_MAX_INPUT,
+  DEFAULT_THRESHOLDS,
+  DEFAULT_TOKEN_OVERLAP,
+  DEFAULT_SLAB_CHARS,
   LABEL_ATTACK,
   LABEL_SAFE,
+  MODEL_REGISTRY,
+  MODEL_TOKEN_WINDOW,
+  NEUTRAL_RISK,
+  Preset,
+  SPECIAL_TOKEN_BUDGET,
   STAGE_BINARY,
   STAGE_HEURISTICS,
-  type ChunkedGuardResult,
-  type GuardResult,
-  type Label,
-  type ProtectOptions,
-  type Stage,
-} from "./guard.js";
-
-export {
-  DEFAULT_CHUNK_OPTIONS,
-  MODEL_TOKEN_WINDOW,
-  chunkContent,
-  type ChunkOptions,
-} from "./chunking.js";
-
-export {
-  DEFAULT_THRESHOLDS,
-  MODEL_REGISTRY,
-  Preset,
+  estimateWindowCount,
   modelId,
   resolveConfig,
   type GuardConfig,
   type GuardConfigInit,
+  type Label,
+  type Stage,
   type Thresholds,
+  type WindowOptions,
 } from "./config.js";
 
 export { PromptInjectionError } from "./exceptions.js";
@@ -39,9 +36,14 @@ export {
   structuralScore,
   type HeuristicRule,
 } from "./stages/heuristics.js";
-export { BinaryStage, NEUTRAL_RISK, softmax, type BinaryPrediction } from "./stages/binary.js";
+export { BinaryStage, softmax, type BinaryPrediction } from "./stages/binary.js";
 export { OnnxModelLoader, type ModelArtifact } from "./models/loader.js";
-export { BastionTokenizer, type Encoding } from "./models/tokenizer.js";
+export {
+  BastionTokenizer,
+  resolveContentWindow,
+  type Encoding,
+  type TokenWindow,
+} from "./models/tokenizer.js";
 
 export {
   BackgroundReporter,

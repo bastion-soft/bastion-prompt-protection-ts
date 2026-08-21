@@ -26,7 +26,10 @@ export class ReportingGuard {
     private readonly context: ReportContext = {},
   ) {}
 
-  async protect(prompt: string, options?: Parameters<Guard["protect"]>[1]): Promise<ChunkedGuardResult> {
+  async protect(
+    prompt: string,
+    options?: Parameters<Guard["protect"]>[1],
+  ): Promise<ChunkedGuardResult> {
     const result = await this.guard.protect(prompt, options);
     const context =
       this.context.content === undefined || this.context.content === null

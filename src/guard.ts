@@ -1,8 +1,14 @@
-import { DEFAULT_CHUNK_OPTIONS, type ChunkOptions, chunkContent } from "./chunking.js";
 import {
   type GuardConfig,
   type GuardConfigInit,
+  type Label,
   type Preset,
+  type Stage,
+  type WindowOptions,
+  LABEL_ATTACK,
+  LABEL_SAFE,
+  STAGE_BINARY,
+  STAGE_HEURISTICS,
   modelId,
   resolveConfig,
 } from "./config.js";
@@ -10,15 +16,6 @@ import { type LicenseStatus, verifyLicense } from "./license.js";
 import { BinaryStage } from "./stages/binary.js";
 import { HeuristicsStage } from "./stages/heuristics.js";
 import { VERSION } from "./version.js";
-
-export const LABEL_SAFE = "safe";
-export const LABEL_ATTACK = "attack";
-
-export const STAGE_HEURISTICS = "heuristics";
-export const STAGE_BINARY = "binary";
-
-export type Label = typeof LABEL_SAFE | typeof LABEL_ATTACK;
-export type Stage = typeof STAGE_HEURISTICS | typeof STAGE_BINARY;
 
 export interface GuardResult {
   risk: number;
@@ -31,23 +28,29 @@ export interface GuardResult {
 
 export interface ChunkedGuardResult extends GuardResult {
   /**
-   * Chunks actually scanned. Fewer than `chunksTotal` when an early hit ended
+   * Windows actually scanned. Fewer than `chunksTotal` when an early hit ended
    * the scan, or when `maxChunks` capped it — compare the two to tell whether
    * the whole input was covered.
    */
   chunksScanned: number;
+  /**
+   * Estimated windows covering the whole input. Exact once `chunksTotalExact`
+   * is true; otherwise extrapolated from observed token density.
+   */
   chunksTotal: number;
+  /** True when `chunksTotal` is exact rather than a density projection. */
+  chunksTotalExact: boolean;
 }
 
-export interface ProtectOptions extends Partial<ChunkOptions> {
+export interface ProtectOptions extends Partial<WindowOptions> {
   /**
-   * Stop after this many chunks. Unlimited by default: the whole input is
+   * Stop after this many windows. Unlimited by default: the whole input is
    * scanned, since a cap silently reintroduces unexamined content. Set it to
    * bound worst-case work on untrusted input, and check
    * `chunksScanned < chunksTotal` to detect partial coverage.
    *
-   * `maxChunks: 1` scans only the first `maxInputChars` window — the same
-   * single-window behaviour as the Python package's `protect()`.
+   * `maxChunks: 1` scans only the first model window — the same single-window
+   * behaviour as the Python package's `protect()`.
    */
   maxChunks?: number;
   /**
@@ -131,20 +134,15 @@ export class Guard {
   }
 
   /**
-   * Scan one window of text through the two-stage pipeline.
+   * Scan one window of text through the binary stage.
    *
-   * Deliberately isolated from chunking so scores stay bit-identical to the
+   * Heuristics run once on the full input in `protect()` before windowing.
+   * Deliberately isolated from windowing so scores stay bit-identical to the
    * Python package's `protect()` when `maxChunks: 1`.
    */
   private async _scan(prompt: string): Promise<GuardResult> {
     const start = performance.now();
     const text = (prompt ?? "").slice(0, this.config.maxInputChars);
-
-    const heuristicScore = this.heuristics !== null ? this.heuristics.run(text) : 0.0;
-
-    if (heuristicScore >= this.config.thresholds.heuristicShortCircuit) {
-      return this.finalize(heuristicScore, STAGE_HEURISTICS, start);
-    }
 
     let binaryRisk = 0.0;
     let binaryAvailable = false;
@@ -156,57 +154,120 @@ export class Guard {
       }
     }
 
-    const risk = Math.max(heuristicScore, binaryRisk);
     const stage = binaryAvailable ? STAGE_BINARY : STAGE_HEURISTICS;
 
-    return this.finalize(risk, stage, start);
+    return this.finalize(binaryRisk, stage, start);
   }
 
   /**
    * Scan prompt content for injection.
    *
-   * By default the input is split into overlapping windows and every chunk is
-   * scanned, stopping early once a chunk reaches `thresholds.attackAbove`.
-   * Pass `{ maxChunks: 1 }` to scan only the first `maxInputChars` window —
-   * the Python-parity single-window mode.
+   * By default the input is split into overlapping token windows and every
+   * window is scanned, stopping early once a window reaches
+   * `thresholds.attackAbove`. Pass `{ maxChunks: 1 }` to scan only the first
+   * model window — the Python-parity single-window mode.
    */
   async protect(prompt: string, options: ProtectOptions = {}): Promise<ChunkedGuardResult> {
     const start = performance.now();
 
     const shouldNormalize = options.normalizeWhitespace ?? this.config.normalizeWhitespace;
     const input = shouldNormalize ? collapseWhitespace(prompt ?? "") : (prompt ?? "");
+    const bounded = input.slice(0, this.config.maxInputChars);
+
+    if (this.heuristics !== null) {
+      const heuristicScore = this.heuristics.run(input);
+      if (heuristicScore >= this.config.thresholds.heuristicShortCircuit) {
+        const base = this.finalize(heuristicScore, STAGE_HEURISTICS, start);
+        return {
+          ...base,
+          chunksScanned: 0,
+          chunksTotal: 0,
+          chunksTotalExact: true,
+        };
+      }
+    }
 
     if (options.maxChunks === 1) {
-      const base = await this._scan(input);
+      const base = await this._scan(bounded);
       return {
         ...base,
         chunksScanned: 1,
         chunksTotal: 1,
+        chunksTotalExact: true,
       };
     }
 
-    const chunks = chunkContent(input, { ...DEFAULT_CHUNK_OPTIONS, ...options });
-    const limit = options.maxChunks ?? chunks.length;
+    if (this.binary === null || bounded.length === 0) {
+      const base = await this._scan(bounded);
+      return {
+        ...base,
+        chunksScanned: 0,
+        chunksTotal: 0,
+        chunksTotalExact: true,
+      };
+    }
+
+    if (!(await this.binary.isAvailable())) {
+      const base = await this._scan(bounded);
+      return {
+        ...base,
+        chunksScanned: 0,
+        chunksTotal: 0,
+        chunksTotalExact: true,
+      };
+    }
+
+    const windowOpts: WindowOptions = {
+      overlapTokens: options.overlapTokens ?? this.config.overlapTokens,
+      windowTokens: options.windowTokens,
+      slabChars: options.slabChars,
+    };
+    const limit = options.maxChunks ?? Number.POSITIVE_INFINITY;
 
     let worst: GuardResult | null = null;
     let scanned = 0;
+    let chunksTotal = 1;
+    let chunksTotalExact = false;
 
-    for (const chunk of chunks) {
+    for await (const window of this.binary.encodeWindows(bounded, windowOpts)) {
       if (scanned >= limit) break;
       scanned += 1;
-      const result = await this._scan(chunk);
+      chunksTotal = window.estimatedTotal;
+      chunksTotalExact = window.exact;
+
+      const pred = await this.binary.predictEncoded(window.encoding);
+      if (!pred.available) {
+        const base = await this._scan(bounded);
+        return {
+          ...base,
+          chunksScanned: 0,
+          chunksTotal: 0,
+          chunksTotalExact: true,
+        };
+      }
+
+      const result = this.finalize(pred.risk, STAGE_BINARY, performance.now());
       if (worst === null || result.risk > worst.risk) worst = result;
       if (worst.risk >= this.config.thresholds.attackAbove) break;
     }
 
-    // `chunkContent` always yields at least one chunk, but an empty prompt
-    // still has to produce a result.
-    const base = worst ?? (await this._scan(input));
+    if (scanned === 0) {
+      const base = await this._scan(bounded);
+      return {
+        ...base,
+        chunksScanned: 0,
+        chunksTotal: 0,
+        chunksTotalExact: true,
+      };
+    }
+
+    const base = worst ?? (await this._scan(bounded));
     return {
       ...base,
       latencyMs: roundTo(performance.now() - start, 3),
       chunksScanned: scanned,
-      chunksTotal: chunks.length,
+      chunksTotal,
+      chunksTotalExact,
     };
   }
 

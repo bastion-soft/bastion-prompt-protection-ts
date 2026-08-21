@@ -39,8 +39,9 @@ const IS_REFERENCE_PLATFORM = process.platform === "darwin" && process.arch === 
 const CROSS_PLATFORM_TOLERANCE = IS_REFERENCE_PLATFORM ? 1e-4 : 0.05;
 
 // Disable normalization so the raw fixture text reaches the model unchanged,
-// keeping scores bit-identical to the Python package.
-const guard = new Guard({ normalizeWhitespace: false });
+// keeping scores bit-identical to the Python package. Python's default input
+// bound is 8000 characters; the fixture long cases were generated with that limit.
+const guard = new Guard({ normalizeWhitespace: false, maxInputChars: 8000 });
 
 beforeAll(async () => {
   await guard.protect("warmup");
