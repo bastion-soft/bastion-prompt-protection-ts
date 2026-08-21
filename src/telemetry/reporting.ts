@@ -6,7 +6,7 @@
  * reporter and call `reporter.report(makeRecord(...))`, or wrap a guard in
  * `ReportingGuard`.
  */
-import type { Guard, GuardResult } from "../guard.js";
+import type { Guard, ChunkedGuardResult } from "../guard.js";
 import { type ReportContext, type Reporter, makeRecord } from "./reporter.js";
 
 /**
@@ -26,8 +26,8 @@ export class ReportingGuard {
     private readonly context: ReportContext = {},
   ) {}
 
-  async protect(prompt: string): Promise<GuardResult> {
-    const result = await this.guard.protect(prompt);
+  async protect(prompt: string, options?: Parameters<Guard["protect"]>[1]): Promise<ChunkedGuardResult> {
+    const result = await this.guard.protect(prompt, options);
     const context =
       this.context.content === undefined || this.context.content === null
         ? { ...this.context, content: prompt }

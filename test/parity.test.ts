@@ -38,7 +38,9 @@ const fixture = JSON.parse(
 const IS_REFERENCE_PLATFORM = process.platform === "darwin" && process.arch === "arm64";
 const CROSS_PLATFORM_TOLERANCE = IS_REFERENCE_PLATFORM ? 1e-4 : 0.05;
 
-const guard = new Guard();
+// Disable normalization so the raw fixture text reaches the model unchanged,
+// keeping scores bit-identical to the Python package.
+const guard = new Guard({ normalizeWhitespace: false });
 
 beforeAll(async () => {
   await guard.protect("warmup");
@@ -64,7 +66,7 @@ describe("parity with the Python implementation", () => {
   });
 
   it.each(fixture.cases.map((c) => [c.id, c] as const))("%s", async (_id, c) => {
-    const result = await guard.protect(c.text);
+    const result = await guard.protect(c.text, { maxChunks: 1 });
 
     // Scores are held to a tolerance off the reference platform.
     expect(Math.abs(result.risk - c.risk)).toBeLessThan(CROSS_PLATFORM_TOLERANCE);
@@ -87,7 +89,7 @@ describe("parity with the Python implementation", () => {
   it(`reproduces every score${IS_REFERENCE_PLATFORM ? " with zero drift" : " within tolerance"}`, async () => {
     let maxDiff = 0;
     for (const c of fixture.cases) {
-      const result = await guard.protect(c.text);
+      const result = await guard.protect(c.text, { maxChunks: 1 });
       maxDiff = Math.max(maxDiff, Math.abs(result.risk - c.risk));
     }
 

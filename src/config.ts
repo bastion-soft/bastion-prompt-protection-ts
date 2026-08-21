@@ -36,6 +36,9 @@ export const DEFAULT_THRESHOLDS: Readonly<Thresholds> = Object.freeze({
   heuristicShortCircuit: 0.95,
 });
 
+export const DEFAULT_MAX_INPUT = 2048;
+export const DEFAULT_WINDOW_OVERLAP = 50;
+
 /** User-supplied guard options. Every field is optional. */
 export interface GuardConfigInit {
   preset?: Preset;
@@ -43,6 +46,7 @@ export interface GuardConfigInit {
   enableHeuristics?: boolean;
   enableBinary?: boolean;
   maxInputChars?: number;
+  windowOverlap?: number;
   cacheDir?: string;
   /**
    * HuggingFace access token. Required only for gated repos — the
@@ -68,6 +72,14 @@ export interface GuardConfigInit {
    */
   licensePath?: string;
   requireLicense?: boolean;
+  /**
+   * Collapse runs of whitespace to a single ASCII space and trim before
+   * scanning. Reduces the effective input size when the source text contains
+   * redundant whitespace (copy-paste artifacts, OCR output, web-scrape noise).
+   * Defaults to `true`. Disable with `false` when exact character-level
+   * fidelity matters, e.g. when reproducing Python-package scores exactly.
+   */
+  normalizeWhitespace?: boolean;
 }
 
 /** Fully-resolved configuration, with every default applied. */
@@ -77,11 +89,13 @@ export interface GuardConfig {
   enableHeuristics: boolean;
   enableBinary: boolean;
   maxInputChars: number;
+  windowOverlap: number;
   cacheDir?: string;
   hfToken?: string;
   model?: string;
   licensePath?: string;
   requireLicense: boolean;
+  normalizeWhitespace: boolean;
 }
 
 export function resolveConfig(init: GuardConfigInit = {}): GuardConfig {
@@ -90,7 +104,8 @@ export function resolveConfig(init: GuardConfigInit = {}): GuardConfig {
     thresholds: { ...DEFAULT_THRESHOLDS, ...init.thresholds },
     enableHeuristics: init.enableHeuristics ?? true,
     enableBinary: init.enableBinary ?? true,
-    maxInputChars: init.maxInputChars ?? 8000,
+    maxInputChars: init.maxInputChars ?? DEFAULT_MAX_INPUT,
+    windowOverlap: init.windowOverlap ?? DEFAULT_WINDOW_OVERLAP,
     cacheDir: init.cacheDir,
     // Unlike Python's huggingface_hub, @huggingface/hub does not read these
     // itself, so resolve them here to keep the two behaving the same.
@@ -98,6 +113,7 @@ export function resolveConfig(init: GuardConfigInit = {}): GuardConfig {
     model: init.model,
     licensePath: init.licensePath,
     requireLicense: init.requireLicense ?? false,
+    normalizeWhitespace: init.normalizeWhitespace ?? true,
   };
 }
 

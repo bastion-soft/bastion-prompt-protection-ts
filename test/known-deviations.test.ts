@@ -35,7 +35,8 @@ const fixture = JSON.parse(
 const IS_REFERENCE_PLATFORM = process.platform === "darwin" && process.arch === "arm64";
 const SCORE_TOLERANCE = IS_REFERENCE_PLATFORM ? 1e-3 : 0.05;
 
-const guard = new Guard();
+// Disable normalization: fixture scores were measured on raw text.
+const guard = new Guard({ normalizeWhitespace: false });
 
 beforeAll(async () => {
   await guard.protect("warmup");
@@ -56,7 +57,7 @@ describe("known deviations from Python", () => {
   it.each(fixture.cases.map((c) => [c.id, c] as const))(
     "%s stays within tolerance and keeps Python's verdict",
     async (_id, c) => {
-      const result = await guard.protect(c.text);
+      const result = await guard.protect(c.text, { maxChunks: 1 });
 
       // The verdict must still agree with Python — that is the hard contract.
       const pythonLabel = c.python_risk >= 0.5 ? "attack" : "safe";

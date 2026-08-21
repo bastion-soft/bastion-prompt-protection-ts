@@ -7,6 +7,7 @@ export {
   type ChunkedGuardResult,
   type GuardResult,
   type Label,
+  type ProtectOptions,
   type Stage,
 } from "./guard.js";
 

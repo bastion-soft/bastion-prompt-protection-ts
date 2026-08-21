@@ -39,14 +39,33 @@ export interface ChunkedGuardResult extends GuardResult {
   chunksTotal: number;
 }
 
-export interface ProtectChunkedOptions extends Partial<ChunkOptions> {
+export interface ProtectOptions extends Partial<ChunkOptions> {
   /**
    * Stop after this many chunks. Unlimited by default: the whole input is
    * scanned, since a cap silently reintroduces unexamined content. Set it to
    * bound worst-case work on untrusted input, and check
    * `chunksScanned < chunksTotal` to detect partial coverage.
+   *
+   * `maxChunks: 1` scans only the first `maxInputChars` window — the same
+   * single-window behaviour as the Python package's `protect()`.
    */
   maxChunks?: number;
+  /**
+   * Collapse runs of whitespace to a single ASCII space and trim before
+   * scanning. Overrides the `normalizeWhitespace` setting on the `Guard`
+   * constructor for this call only. Inherits the constructor value when
+   * omitted (default constructor value: `true`).
+   */
+  normalizeWhitespace?: boolean;
+}
+
+/**
+ * Collapse runs of whitespace to a single ASCII space and trim.
+ * Does not touch zero-width characters (U+200B, U+200C, etc.) — those are
+ * not matched by \s and are caught by the heuristics stage as adversarial.
+ */
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 /** Round half-away-from-zero to `digits` places, matching Python's `round()` on positives. */
@@ -111,7 +130,13 @@ export class Guard {
     return verifyLicense(this.config.licensePath);
   }
 
-  async protect(prompt: string): Promise<GuardResult> {
+  /**
+   * Scan one window of text through the two-stage pipeline.
+   *
+   * Deliberately isolated from chunking so scores stay bit-identical to the
+   * Python package's `protect()` when `maxChunks: 1`.
+   */
+  private async _scan(prompt: string): Promise<GuardResult> {
     const start = performance.now();
     const text = (prompt ?? "").slice(0, this.config.maxInputChars);
 
@@ -138,35 +163,29 @@ export class Guard {
   }
 
   /**
-   * Scan long content by splitting it into pieces and taking the worst verdict.
+   * Scan prompt content for injection.
    *
-   * `protect()` reads at most 512 tokens (~2,000 characters) and silently
-   * ignores the rest, so an injection buried at offset 5,000 of a 20 KB
-   * document scores identically to the clean document. Content inside the
-   * window is also scored down as benign text around it grows. Both make
-   * `protect()` the wrong tool for documents, tool results, and retrieved
-   * passages — use this instead.
-   *
-   * Stops at the first chunk to reach `thresholds.attackAbove`, since no later
-   * chunk can change the verdict. Clean content therefore costs the most: every
-   * chunk is scanned.
-   *
-   * `protect()` is deliberately left untouched by this, so its scores stay
-   * bit-identical to the Python package.
+   * By default the input is split into overlapping windows and every chunk is
+   * scanned, stopping early once a chunk reaches `thresholds.attackAbove`.
+   * Pass `{ maxChunks: 1 }` to scan only the first `maxInputChars` window —
+   * the Python-parity single-window mode.
    */
-  async protectChunked(
-    prompt: string,
-    options: ProtectChunkedOptions = {},
-  ): Promise<ChunkedGuardResult> {
+  async protect(prompt: string, options: ProtectOptions = {}): Promise<ChunkedGuardResult> {
     const start = performance.now();
 
-    // Deliberately NOT truncated to `maxInputChars`. That limit exists so a
-    // single `protect()` call matches Python's, and each chunk is far below it
-    // anyway — applying it to the whole document would silently drop everything
-    // past 8,000 characters, recreating the blind spot this method removes.
-    // Bound the work with `maxChunks` instead, which is visible in the result.
-    const text = prompt ?? "";
-    const chunks = chunkContent(text, { ...DEFAULT_CHUNK_OPTIONS, ...options });
+    const shouldNormalize = options.normalizeWhitespace ?? this.config.normalizeWhitespace;
+    const input = shouldNormalize ? collapseWhitespace(prompt ?? "") : (prompt ?? "");
+
+    if (options.maxChunks === 1) {
+      const base = await this._scan(input);
+      return {
+        ...base,
+        chunksScanned: 1,
+        chunksTotal: 1,
+      };
+    }
+
+    const chunks = chunkContent(input, { ...DEFAULT_CHUNK_OPTIONS, ...options });
     const limit = options.maxChunks ?? chunks.length;
 
     let worst: GuardResult | null = null;
@@ -175,14 +194,14 @@ export class Guard {
     for (const chunk of chunks) {
       if (scanned >= limit) break;
       scanned += 1;
-      const result = await this.protect(chunk);
+      const result = await this._scan(chunk);
       if (worst === null || result.risk > worst.risk) worst = result;
       if (worst.risk >= this.config.thresholds.attackAbove) break;
     }
 
     // `chunkContent` always yields at least one chunk, but an empty prompt
     // still has to produce a result.
-    const base = worst ?? (await this.protect(text));
+    const base = worst ?? (await this._scan(input));
     return {
       ...base,
       latencyMs: roundTo(performance.now() - start, 3),
