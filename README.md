@@ -144,27 +144,6 @@ In the parent: keep a `Map` of pending request ids, enforce your own deadline
 growing, and reject pending requests when the child exits so callers fail
 predictably rather than hanging.
 
-### Telemetry
-
-Off by default — zero egress, no background timer. Opt in with a reporter:
-
-```ts
-import {
-  Guard,
-  ReportingGuard,
-  buildReporter,
-  telemetryConfigFromEnv,
-} from "@bastionsoft/prompt-protection";
-
-const reporter = await buildReporter(telemetryConfigFromEnv());
-const guard = new ReportingGuard(new Guard(), reporter);
-```
-
-Channels: native HTTP (`BASTION_TELEMETRY_ENDPOINT` + `BASTION_TELEMETRY_KEY`),
-OTLP (`BASTION_OTEL_ENDPOINT`), and LangSmith (`BASTION_LANGSMITH`). The OTel and
-LangSmith packages are optional peer dependencies, imported lazily. Reporting is
-fire-and-forget: it never adds latency to, or throws into, the detection path.
-
 ## Editions
 
 |           | **Free** (this package)         | **Commercial**                                        |

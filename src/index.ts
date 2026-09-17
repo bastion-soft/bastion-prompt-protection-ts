@@ -41,24 +41,4 @@ export {
 } from "./stages/heuristics.js";
 export { ClassifierStage, type ClassifierPrediction } from "./stages/classifier.js";
 
-export {
-  BackgroundReporter,
-  MultiReporter,
-  NoopReporter,
-  ReportingGuard,
-  buildReporter,
-  buildTelemetryRecord,
-  defaultReporter,
-  langsmithRunPayload,
-  resetDefaultReporter,
-  telemetryConfigFromEnv,
-  type Reporter,
-  type ReportContext,
-  type ReportOrigin,
-  type ReportVector,
-  type TelemetryConfig,
-  type TelemetryDefaults,
-  type TelemetryRecord,
-} from "./telemetry/index.js";
-
 export { VERSION } from "./version.js";

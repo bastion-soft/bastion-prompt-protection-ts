@@ -13,17 +13,6 @@ export function roundTo(value: number, digits: number): number {
   return Math.round(value * f) / f;
 }
 
-export function envFloat(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number.parseFloat(raw);
-  return Number.isNaN(parsed) ? fallback : parsed;
-}
-
-export function envBool(name: string): boolean {
-  return ["1", "true", "yes", "on"].includes((process.env[name] ?? "").trim().toLowerCase());
-}
-
 /**
  * Python's `datetime.fromisoformat` treats a timestamp with no offset as naive
  * and the caller then pins it to UTC. JavaScript's `Date` parses a bare

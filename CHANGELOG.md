@@ -3,6 +3,17 @@
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/);
 this project follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-09-17
+
+### Removed
+
+- **Breaking:** Removed the entire telemetry subsystem: `ReportingGuard`,
+  `BackgroundReporter`, `MultiReporter`, `NoopReporter`, `buildReporter`,
+  `buildTelemetryRecord`, `defaultReporter`, `telemetryConfigFromEnv`, and all
+  related types. This package is an air-gapped security scanner — detection
+  events are never transmitted anywhere. Removed optional OpenTelemetry and
+  LangSmith peer dependencies.
+
 ## [0.4.0] — 2026-09-17
 
 ### Changed
