@@ -1,6 +1,6 @@
 {
   "name": "@bastionsoft/prompt-protection",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Local prompt injection and jailbreak detection for LLM applications",
   "keywords": [
     "prompt-injection",

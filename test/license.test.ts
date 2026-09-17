@@ -5,7 +5,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { canonicalJson, verifyLicense } from "../src/license.js";
+import { canonicalJson } from "../src/utils.js";
+import { verifyLicense } from "../src/license.js";
 
 // A throwaway Ed25519 keypair stands in for the real signing key, the same way
 // the Python suite monkeypatches the embedded public key.

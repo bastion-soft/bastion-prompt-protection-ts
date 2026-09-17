@@ -1,7 +1,9 @@
 # Design: Consolidate Guard Constants into `config.ts`
 
 **Date:** 2026-08-21  
-**Status:** Approved
+**Status:** Superseded (2026-09-17) — constants were consolidated as described, but
+`chunkContent`, `ChunkOptions`, `DEFAULT_CHUNK_OPTIONS`, and `MIN_OVERLAP` were
+removed in the 0.3.0 token-window rewrite. See the 0.4.0 refactor spec.
 
 ## Goal
 

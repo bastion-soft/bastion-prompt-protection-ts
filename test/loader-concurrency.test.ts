@@ -24,7 +24,7 @@ describe("concurrent model loading", () => {
     // degrades to heuristics-only and reports a null modelVersion.
     for (const [i, result] of results.entries()) {
       expect(guards[i]!.modelVersion).not.toBeNull();
-      expect(result.stageReached).toBe("binary");
+      expect(result.stageReached).toBe("classifier");
     }
 
     // And they must agree — same weights, same score.

@@ -75,6 +75,7 @@ export class HeuristicsStage {
     if (!text) return 0.0;
     let best = 0.0;
     for (const rule of this.rules) {
+      rule.pattern.lastIndex = 0;
       if (rule.pattern.test(text) && rule.confidence > best) best = rule.confidence;
     }
     return Math.max(best, structuralScore(text));

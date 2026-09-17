@@ -57,7 +57,7 @@ describe("known deviations from Python", () => {
   it.each(fixture.cases.map((c) => [c.id, c] as const))(
     "%s stays within tolerance and keeps Python's verdict",
     async (_id, c) => {
-      const result = await guard.protect(c.text, { maxChunks: 1 });
+      const result = await guard.protect(c.text, { maxWindows: 1 });
 
       // The verdict must still agree with Python — that is the hard contract.
       const pythonLabel = c.python_risk >= 0.5 ? "attack" : "safe";

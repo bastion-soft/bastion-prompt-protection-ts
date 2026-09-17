@@ -1,5 +1,5 @@
 /**
- * Chunked scanning exists because a single-window `protect({ maxChunks: 1 })`
+ * Windowed scanning exists because a single-window `protect({ maxWindows: 1 })`
  * reads at most 512 tokens. These tests run real inference, so they live with
  * the parity suite rather than the fast unit tests.
  */
@@ -18,63 +18,63 @@ beforeAll(async () => {
   await guard.protect("warmup");
   if (guard.modelVersion === null) {
     throw new Error(
-      "Model weights did not load; chunked scanning needs the ONNX stage. " +
+      "Model weights did not load; windowed scanning needs the ONNX stage. " +
         'Look for a "bastion-prompt-protection: model … unavailable" warning ' +
         "earlier in the log. This is an environment failure, not a logic failure.",
     );
   }
 }, 600_000);
 
-describe("protect (chunked)", () => {
+describe("protect (windowed)", () => {
   it("finds an injection that a single-window scan cannot see past its token window", async () => {
     // Buried well beyond ~2000 characters, so the classifier never reads it.
     const document = FILLER.repeat(40) + INJECTION + " " + FILLER.repeat(10);
     expect(document.length).toBeGreaterThan(6000);
 
-    const whole = await guard.protect(document, { maxChunks: 1 });
-    expect(whole.label).toBe("safe"); // the blind spot chunking exists for
+    const whole = await guard.protect(document, { maxWindows: 1 });
+    expect(whole.label).toBe("safe"); // the blind spot windowing exists for
 
-    const chunked = await guard.protect(document);
-    expect(chunked.label).toBe("attack");
-    expect(chunked.isAttack).toBe(true);
+    const windowed = await guard.protect(document);
+    expect(windowed.label).toBe("attack");
+    expect(windowed.isAttack).toBe(true);
   }, 300_000);
 
   it("scans past maxInputChars when the injection sits beyond the bound", async () => {
     // `maxInputChars` bounds the whole input before windowing. Place the
-    // injection just inside the bound so chunked scanning still reaches it.
+    // injection just inside the bound so windowed scanning still reaches it.
     const filler = FILLER.repeat(300);
     const within = filler.slice(0, guard.config.maxInputChars - INJECTION.length - 20);
     const document = within + " " + INJECTION;
     expect(document.length).toBeLessThanOrEqual(guard.config.maxInputChars);
 
-    const chunked = await guard.protect(document);
-    expect(chunked.label).toBe("attack");
+    const windowed = await guard.protect(document);
+    expect(windowed.label).toBe("attack");
   }, 600_000);
 
-  it("bounds work with maxChunks and makes partial coverage visible", async () => {
+  it("bounds work with maxWindows and makes partial coverage visible", async () => {
     const document = FILLER.repeat(200) + INJECTION;
-    const capped = await guard.protect(document, { maxChunks: 3 });
-    expect(capped.chunksScanned).toBe(3);
-    expect(capped.chunksTotal).toBeGreaterThan(3);
+    const capped = await guard.protect(document, { maxWindows: 3 });
+    expect(capped.windowsScanned).toBe(3);
+    expect(capped.windowsTotal).toBeGreaterThan(3);
     // The caller can detect that the input was not fully covered.
-    expect(capped.chunksScanned).toBeLessThan(capped.chunksTotal);
+    expect(capped.windowsScanned).toBeLessThan(capped.windowsTotal);
   }, 600_000);
 
   it("leaves genuinely benign content alone", async () => {
     const document = FILLER.repeat(40);
-    const chunked = await guard.protect(document);
-    expect(chunked.label).toBe("safe");
-    // Nothing hit, so every chunk was scanned.
-    expect(chunked.chunksScanned).toBe(chunked.chunksTotal);
+    const windowed = await guard.protect(document);
+    expect(windowed.label).toBe("safe");
+    // Nothing hit, so every window was scanned.
+    expect(windowed.windowsScanned).toBe(windowed.windowsTotal);
   }, 300_000);
 
   it("stops early once a window decides the verdict", async () => {
     const document = INJECTION + " " + FILLER.repeat(40);
-    const chunked = await guard.protect(document);
-    expect(chunked.label).toBe("attack");
-    expect(chunked.chunksScanned).toBeLessThanOrEqual(chunked.chunksTotal);
-    if (chunked.chunksTotalExact) {
-      expect(chunked.chunksScanned).toBeLessThan(chunked.chunksTotal);
+    const windowed = await guard.protect(document);
+    expect(windowed.label).toBe("attack");
+    expect(windowed.windowsScanned).toBeLessThanOrEqual(windowed.windowsTotal);
+    if (windowed.windowsTotalExact) {
+      expect(windowed.windowsScanned).toBeLessThan(windowed.windowsTotal);
     }
   }, 300_000);
 
@@ -82,25 +82,25 @@ describe("protect (chunked)", () => {
     const document = FILLER.repeat(80);
     const narrow = await guard.protect(document, { overlapTokens: 64 });
     const wide = await guard.protect(document, { overlapTokens: 256 });
-    expect(wide.chunksTotal).toBeGreaterThan(narrow.chunksTotal);
-    expect(wide.chunksTotalExact).toBe(true);
-    expect(narrow.chunksTotalExact).toBe(true);
+    expect(wide.windowsTotal).toBeGreaterThan(narrow.windowsTotal);
+    expect(wide.windowsTotalExact).toBe(true);
+    expect(narrow.windowsTotalExact).toBe(true);
   }, 300_000);
 
-  it("agrees with maxChunks:1 on short content that fits the window", async () => {
+  it("agrees with maxWindows:1 on short content that fits the window", async () => {
     for (const text of ["What is the weather in Copenhagen?", INJECTION]) {
-      const [single, chunked] = [
-        await guard.protect(text, { maxChunks: 1 }),
+      const [single, windowed] = [
+        await guard.protect(text, { maxWindows: 1 }),
         await guard.protect(text),
       ];
-      expect(chunked.label).toBe(single.label);
+      expect(windowed.label).toBe(single.label);
     }
   }, 300_000);
 
-  it("keeps maxChunks:1 bit-identical to Python's single-window protect()", async () => {
+  it("keeps maxWindows:1 bit-identical to Python's single-window protect()", async () => {
     const document = FILLER.repeat(40) + INJECTION;
-    const a = await guard.protect(document, { maxChunks: 1 });
-    const b = await guard.protect(document, { maxChunks: 1 });
+    const a = await guard.protect(document, { maxWindows: 1 });
+    const b = await guard.protect(document, { maxWindows: 1 });
     expect(a.risk).toBe(b.risk);
     expect(a.label).toBe("safe");
   }, 300_000);

@@ -19,7 +19,7 @@ import { Guard } from "@bastionsoft/prompt-protection";
 const guard = new Guard();
 
 const result = await guard.protect("Ignore all previous instructions.");
-// { risk: 0.9853, label: "attack", stageReached: "binary", latencyMs: 32.6, isAttack: true }
+// { risk: 0.9853, label: "attack", stageReached: "classifier", latencyMs: 32.6, isAttack: true }
 
 if (result.isAttack) {
   // block, log, or route to a human
@@ -36,13 +36,14 @@ same model, same thresholds, same scores.
 
 ## Detection pipeline
 
-1. Truncate to `maxInputChars` (characters, not tokens).
-2. **Heuristics** — chat-template control tokens (`0.97`), fake end-of-prompt
-   delimiters (`0.90`), zero-width obfuscation (`0.96`), spaced letters (`0.80`),
-   base64 payloads (`0.55`).
-3. A heuristic score ≥ `0.95` returns immediately — **the model never loads**, so
+1. **Heuristics** run on the full input (before any truncation) — chat-template
+   control tokens (`0.97`), fake end-of-prompt delimiters (`0.90`), zero-width
+   obfuscation (`0.96`), spaced letters (`0.80`), base64 payloads (`0.55`).
+2. A heuristic score ≥ `0.95` returns immediately — **the model never loads**, so
    structural attacks cost microseconds.
-4. Otherwise the ONNX classifier runs; `risk = max(heuristic, model)`.
+3. Otherwise the input is truncated to `maxInputChars` (characters, not tokens)
+   and scanned through the ONNX classifier in overlapping token windows; the
+   worst window score is returned.
 
 If the weights can't be downloaded, the classifier reports itself unavailable and
 the guard degrades to heuristics-only with a warning rather than throwing.
@@ -58,7 +59,7 @@ the guard degrades to heuristics-only with a warning rather than throwing.
 | `thresholds.attackAbove`           |       `0.5` | Risk at or above this is labelled `attack`                   |
 | `thresholds.heuristicShortCircuit` |      `0.95` | Heuristic score at or above this skips the model             |
 | `enableHeuristics`                 |      `true` | Run the regex stage                                          |
-| `enableBinary`                     |      `true` | Run the ONNX stage                                           |
+| `enableClassifier`                 |      `true` | Run the ONNX classifier stage                                |
 | `maxInputChars`                    |    `262144` | Total input bound before token windowing (characters)        |
 | `overlapTokens`                    |        `64` | Content-token overlap between consecutive windows            |
 | `cacheDir`                         |           — | Override the model cache location                            |
@@ -84,19 +85,19 @@ windows and takes the worst verdict:
 
 ```ts
 const result = await guard.protect(document);
-// { risk, label, isAttack, chunksScanned, chunksTotal, chunksTotalExact, … }
+// { risk, label, isAttack, windowsScanned, windowsTotal, windowsTotalExact, … }
 ```
 
 | Option          |    Default | Meaning                                          |
 | --------------- | ---------: | ------------------------------------------------ |
 | `overlapTokens` |       `64` | Content tokens repeated from the previous window |
-| `maxChunks`     | _no limit_ | Stop after this many windows                     |
+| `maxWindows`    | _no limit_ | Stop after this many windows                     |
 
-Pass `{ maxChunks: 1 }` for Python-parity single-window mode (first 512 tokens
+Pass `{ maxWindows: 1 }` for Python-parity single-window mode (first 512 tokens
 only). It stops at the first window over the threshold, so **clean content is
-the expensive case** — every window is scanned. Compare `chunksScanned` with
-`chunksTotal` to tell whether the whole input was covered; when
-`chunksTotalExact` is false, `chunksTotal` is a density-based estimate.
+the expensive case** — every window is scanned. Compare `windowsScanned` with
+`windowsTotal` to tell whether the whole input was covered; when
+`windowsTotalExact` is false, `windowsTotal` is a density-based estimate.
 
 Constants are exported as `MODEL_TOKEN_WINDOW`, `CONTENT_TOKEN_WINDOW`,
 `DEFAULT_TOKEN_OVERLAP`, and `DEFAULT_SLAB_CHARS`.

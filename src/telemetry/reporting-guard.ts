@@ -3,11 +3,17 @@
  * into `Guard`.
  *
  * `Guard` stays a pure detector. Reporting is layered on by composition: hold a
- * reporter and call `reporter.report(makeRecord(...))`, or wrap a guard in
+ * reporter and call `reporter.report(buildTelemetryRecord(...))`, or wrap a guard in
  * `ReportingGuard`.
  */
-import type { Guard, ChunkedGuardResult } from "../guard.js";
-import { type ReportContext, type Reporter, makeRecord } from "./reporter.js";
+import type { Guard, WindowedGuardResult } from "../guard.js";
+import type { Guardable } from "../guardable.js";
+import {
+  type ReportContext,
+  type Reporter,
+  type TelemetryDefaults,
+  buildTelemetryRecord,
+} from "./reporter.js";
 
 /**
  * Wrap a `Guard` so each `protect` also reports — by composition.
@@ -19,28 +25,35 @@ import { type ReportContext, type Reporter, makeRecord } from "./reporter.js";
  * await safe.protect("…"); // detects, then fire-and-forget reports
  * ```
  */
-export class ReportingGuard {
+export class ReportingGuard implements Guardable {
   constructor(
     private readonly guard: Guard,
     private readonly reporter: Reporter,
     private readonly context: ReportContext = {},
+    private readonly telemetryDefaults: TelemetryDefaults = {},
   ) {}
 
   async protect(
     prompt: string,
     options?: Parameters<Guard["protect"]>[1],
-  ): Promise<ChunkedGuardResult> {
+  ): Promise<WindowedGuardResult> {
     const result = await this.guard.protect(prompt, options);
     const context =
       this.context.content === undefined || this.context.content === null
         ? { ...this.context, content: prompt }
         : this.context;
     try {
-      this.reporter.report(makeRecord(result, context, this.guard));
+      this.reporter.report(
+        buildTelemetryRecord(result, context, this.guard, this.telemetryDefaults),
+      );
     } catch {
       // Telemetry must never break detection.
     }
     return result;
+  }
+
+  async shutdown(): Promise<void> {
+    await this.reporter.shutdown();
   }
 
   get sdkVersion(): string {

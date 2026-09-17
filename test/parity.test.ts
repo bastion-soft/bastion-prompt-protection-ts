@@ -67,11 +67,11 @@ describe("parity with the Python implementation", () => {
   });
 
   it.each(fixture.cases.map((c) => [c.id, c] as const))("%s", async (_id, c) => {
-    const result = await guard.protect(c.text, { maxChunks: 1 });
+    const result = await guard.protect(c.text, { maxWindows: 1 });
 
     // Scores are held to a tolerance off the reference platform.
     expect(Math.abs(result.risk - c.risk)).toBeLessThan(CROSS_PLATFORM_TOLERANCE);
-    expect(result.stageReached).toBe(c.stage_reached);
+    expect(result.stageReached).toBe(c.stage_reached === "binary" ? "classifier" : c.stage_reached);
 
     // The verdict must match — except where it cannot. An input scoring within
     // the drift band of the threshold has no platform-stable label: `long-002`
@@ -90,7 +90,7 @@ describe("parity with the Python implementation", () => {
   it(`reproduces every score${IS_REFERENCE_PLATFORM ? " with zero drift" : " within tolerance"}`, async () => {
     let maxDiff = 0;
     for (const c of fixture.cases) {
-      const result = await guard.protect(c.text, { maxChunks: 1 });
+      const result = await guard.protect(c.text, { maxWindows: 1 });
       maxDiff = Math.max(maxDiff, Math.abs(result.risk - c.risk));
     }
 

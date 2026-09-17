@@ -64,7 +64,7 @@ describe("heuristics parity with Python", () => {
   const maxChars = fixture.meta.max_input_chars;
 
   it.each(fixture.cases.map((c) => [c.id, c] as const))("%s", (_id, c) => {
-    // The guard char-truncates before the heuristics stage sees the text.
+    // Parity fixture scores are computed on text truncated to max_input_chars.
     const score = stage.run(c.text.slice(0, maxChars));
     expect(score).toBeCloseTo(c.heuristic_score, 6);
   });

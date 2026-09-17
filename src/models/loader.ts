@@ -1,6 +1,13 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { downloadFileToCacheDir, listFiles, modelInfo } from "@huggingface/hub";
+import {
+  downloadFileToCacheDir,
+  getHFHubCachePath,
+  getRepoFolderName,
+  listFiles,
+  modelInfo,
+  REGEX_COMMIT_HASH,
+} from "@huggingface/hub";
 import type { InferenceSession } from "onnxruntime-node";
 import { BastionTokenizer } from "./tokenizer.js";
 
@@ -65,7 +72,7 @@ export class OnnxModelLoader {
    * HF commit SHA the loaded snapshot resolved to, or null if the model has not
    * been loaded yet. Does NOT trigger loading.
    */
-  get revision(): string | null {
+  get snapshotSha(): string | null {
     if (this.artifactValue === null) return null;
     return path.basename(this.artifactValue.modelDir);
   }
@@ -86,7 +93,7 @@ export class OnnxModelLoader {
     }
   }
 
-  async artifact(): Promise<ModelArtifact> {
+  async getArtifact(): Promise<ModelArtifact> {
     if (!(await this.isAvailable())) {
       throw new Error(`Model ${this.modelId} is not available: ${this.loadError?.message}`);
     }
@@ -113,13 +120,38 @@ export class OnnxModelLoader {
     // which is also what `modelVersion` is derived from.
     const auth = this.hfToken ? { accessToken: this.hfToken } : {};
 
-    const info = await modelInfo({ name: this.modelId, additionalFields: ["sha"], ...auth });
-    const sha = info.sha;
-    if (!sha) throw new Error(`could not resolve commit sha for ${this.modelId}`);
+    // ── Offline-first: avoid network calls when the model is already cached ────
+    //
+    // `modelInfo()` + `listFiles()` hit the Hub on every child-process startup,
+    // even when the model is fully on disk.  The snapshot directory name IS the
+    // commit SHA, and the directory contents ARE the file list, so we can derive
+    // both without any network I/O when a snapshot already exists.
+    //
+    // `downloadFileToCacheDir` already short-circuits when called with a known
+    // 40-char SHA and the pointer file is present — so once the SHA is resolved
+    // from disk the rest of the load is purely local.
+    //
+    // Falls back to the original network path when no snapshot is found (first
+    // run or explicit cache wipe).
+    const cacheDir = this.cacheDir ?? getHFHubCachePath();
+    const storageFolder = path.join(cacheDir, getRepoFolderName({ type: "model", name: this.modelId }));
 
-    const allFiles: string[] = [];
-    for await (const entry of listFiles({ repo, revision: sha, recursive: true, ...auth })) {
-      if (entry.type === "file") allFiles.push(entry.path);
+    let sha: string | undefined;
+    let allFiles: string[];
+
+    const cachedSha = await findCachedSnapshotSha(path.join(storageFolder, "snapshots"));
+    if (cachedSha !== null) {
+      sha = cachedSha;
+      allFiles = await walkDir(path.join(storageFolder, "snapshots", sha));
+    } else {
+      const info = await modelInfo({ name: this.modelId, additionalFields: ["sha"], ...auth });
+      sha = info.sha;
+      if (!sha) throw new Error(`could not resolve commit sha for ${this.modelId}`);
+
+      allFiles = [];
+      for await (const entry of listFiles({ repo, revision: sha, recursive: true, ...auth })) {
+        if (entry.type === "file") allFiles.push(entry.path);
+      }
     }
 
     // Prefer the quantized build; fall back to the full ONNX set only if the
@@ -130,7 +162,7 @@ export class OnnxModelLoader {
 
     const downloaded = new Map<string, string>();
     for (const file of wanted) {
-      const localPath = await downloadWithRetryImpl({
+      const localPath = await downloadWithRetry({
         repo,
         path: file,
         revision: sha,
@@ -182,8 +214,43 @@ export class OnnxModelLoader {
   }
 }
 
+/**
+ * Return the 40-char commit SHA of the first snapshot found inside
+ * `snapshotsDir`, or `null` if none exists yet.
+ *
+ * Directory order from `readdir` is undefined; in practice the HF cache holds
+ * one active snapshot per repo revision pin, so the first 40-char hex match is
+ * sufficient. If multiple snapshots coexist (e.g. after a manual cache merge),
+ * prefer pinning `revision` explicitly in future loader work.
+ */
+async function findCachedSnapshotSha(snapshotsDir: string): Promise<string | null> {
+  try {
+    const entries = await readdir(snapshotsDir);
+    return entries.find((e) => REGEX_COMMIT_HASH.test(e)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Recursively list all files inside `dir`, returning their paths relative to
+ * `dir` (using forward-slash separators, matching the HF Hub file path format).
+ */
+async function walkDir(dir: string, rel = ""): Promise<string[]> {
+  const results: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      results.push(...(await walkDir(path.join(dir, entry.name), entryRel)));
+    } else {
+      results.push(entryRel);
+    }
+  }
+  return results;
+}
+
 /** Download one file, tolerating a concurrent process warming the same cache. */
-async function downloadWithRetryImpl(
+async function downloadWithRetry(
   params: Parameters<typeof downloadFileToCacheDir>[0],
 ): Promise<string> {
   // The hub client downloads to `<blob>.incomplete` and then renames it, so two

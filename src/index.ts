@@ -1,4 +1,10 @@
-export { Guard, type ChunkedGuardResult, type GuardResult, type ProtectOptions } from "./guard.js";
+export {
+  Guard,
+  type GuardResult,
+  type ProtectOptions,
+  type WindowedGuardResult,
+} from "./guard.js";
+export type { Guardable } from "./guardable.js";
 
 export {
   CONTENT_TOKEN_WINDOW,
@@ -12,8 +18,7 @@ export {
   MODEL_TOKEN_WINDOW,
   NEUTRAL_RISK,
   Preset,
-  SPECIAL_TOKEN_BUDGET,
-  STAGE_BINARY,
+  STAGE_CLASSIFIER,
   STAGE_HEURISTICS,
   estimateWindowCount,
   modelId,
@@ -26,24 +31,15 @@ export {
   type WindowOptions,
 } from "./config.js";
 
-export { PromptInjectionError } from "./exceptions.js";
-export { TemperatureScaler } from "./calibration.js";
-export { canonicalJson, verifyLicense, type LicenseStatus } from "./license.js";
+export { PromptInjectionError } from "./errors.js";
+export { verifyLicense, type LicenseStatus } from "./license.js";
 
 export {
   HeuristicsStage,
   RULES,
-  structuralScore,
   type HeuristicRule,
 } from "./stages/heuristics.js";
-export { BinaryStage, softmax, type BinaryPrediction } from "./stages/binary.js";
-export { OnnxModelLoader, type ModelArtifact } from "./models/loader.js";
-export {
-  BastionTokenizer,
-  resolveContentWindow,
-  type Encoding,
-  type TokenWindow,
-} from "./models/tokenizer.js";
+export { ClassifierStage, type ClassifierPrediction } from "./stages/classifier.js";
 
 export {
   BackgroundReporter,
@@ -51,14 +47,17 @@ export {
   NoopReporter,
   ReportingGuard,
   buildReporter,
+  buildTelemetryRecord,
   defaultReporter,
   langsmithRunPayload,
-  makeRecord,
   resetDefaultReporter,
   telemetryConfigFromEnv,
   type Reporter,
   type ReportContext,
+  type ReportOrigin,
+  type ReportVector,
   type TelemetryConfig,
+  type TelemetryDefaults,
   type TelemetryRecord,
 } from "./telemetry/index.js";
 

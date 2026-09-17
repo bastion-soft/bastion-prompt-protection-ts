@@ -6,7 +6,7 @@
  * whitespace so the concatenated token stream matches a single `encode()` call.
  * Whitespace-free runs (base64, minified JSON, HTML) are hard-cut at the limit.
  */
-import { DEFAULT_SLAB_CHARS } from "./config.js";
+import { DEFAULT_SLAB_CHARS } from "./constants.js";
 
 export function* slabify(text: string, slabChars: number = DEFAULT_SLAB_CHARS): Generator<string> {
   const limit = Math.max(1, slabChars);

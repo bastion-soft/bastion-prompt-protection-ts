@@ -6,6 +6,8 @@
  * enabled independently; the reporter pipeline fans to whichever are configured.
  */
 
+import { envBool, envFloat } from "../utils.js";
+
 export interface TelemetryConfig {
   // Native HTTP channel → Bastion gateway console
   endpoint?: string;
@@ -21,17 +23,6 @@ export interface TelemetryConfig {
   clientId?: string;
   source?: string;
   environment?: string;
-}
-
-function envFloat(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number.parseFloat(raw);
-  return Number.isNaN(parsed) ? fallback : parsed;
-}
-
-function envBool(name: string): boolean {
-  return ["1", "true", "yes", "on"].includes((process.env[name] ?? "").trim().toLowerCase());
 }
 
 export function telemetryConfigFromEnv(): TelemetryConfig {

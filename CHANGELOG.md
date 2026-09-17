@@ -3,6 +3,36 @@
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/);
 this project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-09-17
+
+### Changed
+
+- **Breaking:** Renamed windowing API: `ChunkedGuardResult` → `WindowedGuardResult`,
+  `chunksScanned` / `chunksTotal` / `chunksTotalExact` → `windowsScanned` /
+  `windowsTotal` / `windowsTotalExact`, `maxChunks` → `maxWindows`.
+- **Breaking:** Renamed classifier stage: `STAGE_BINARY` → `STAGE_CLASSIFIER`
+  (value `"classifier"`), `enableBinary` → `enableClassifier`, `BinaryStage` →
+  `ClassifierStage`, `BinaryPrediction` → `ClassifierPrediction`.
+- **Breaking:** Renamed `makeRecord` → `buildTelemetryRecord`.
+- **Breaking:** Removed from the public barrel: `softmax`, `structuralScore`,
+  `TemperatureScaler`, `OnnxModelLoader`, `ModelArtifact`, `Encoding`,
+  `TokenWindow`, `resolveContentWindow`, `SPECIAL_TOKEN_BUDGET`, `canonicalJson`.
+- Split `config.ts` into user-facing config (`config.ts`) and vocabulary/window
+  constants (`constants.ts`).
+- Added `Guardable` interface; `Guard` and `ReportingGuard` both implement it.
+- `ReportingGuard` gains `shutdown()` for reporter lifecycle.
+- `Guard.config.thresholds` is frozen on construction.
+- `LicenseVerifier` class wraps offline license verification; `verifyLicense()`
+  remains as a convenience wrapper.
+- Generic helpers moved to `utils.ts` (`collapseWhitespace`, `roundTo`,
+  `canonicalJson`, env parsing, ISO date parsing).
+- `ReportContext.vector` and `.origin` are typed unions.
+- `buildTelemetryRecord` applies `clientId`, `source`, and `environment` defaults.
+- Fixed `DEFAULT_MAX_INPUT` default (`262144`, was incorrectly `65536` in code).
+- Fixed `Guard.sdkVersion` (`VERSION` now tracks `package.json`).
+- Fixed license path discovery: corrupt JSON in one candidate no longer skips
+  remaining candidates.
+
 ## [0.3.0] — 2026-08-21
 
 ### Changed

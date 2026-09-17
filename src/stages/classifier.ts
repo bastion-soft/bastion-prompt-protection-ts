@@ -1,16 +1,16 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { TemperatureScaler } from "../calibration.js";
-import { NEUTRAL_RISK, type WindowOptions } from "../config.js";
+import { NEUTRAL_RISK, type WindowOptions } from "../constants.js";
+import { type ModelArtifact, OnnxModelLoader } from "../models/loader.js";
 import { type Encoding, type TokenWindow } from "../models/tokenizer.js";
-import { OnnxModelLoader } from "../models/loader.js";
 
-export interface BinaryPrediction {
+export interface ClassifierPrediction {
   risk: number;
   available: boolean;
 }
 
-export class BinaryStage {
+export class ClassifierStage {
   private readonly loader: OnnxModelLoader;
   // Default to identity scaling (T=1.0); replaced with the fitted value the
   // first time the model loads successfully.
@@ -35,29 +35,29 @@ export class BinaryStage {
    * loaded yet; does not trigger loading.
    */
   get modelVersion(): string | null {
-    const sha = this.loader.revision;
+    const sha = this.loader.snapshotSha;
     return sha === null ? null : sha.slice(0, 7);
   }
 
-  async predict(text: string): Promise<BinaryPrediction> {
+  async predict(text: string): Promise<ClassifierPrediction> {
     if (!(await this.isAvailable())) {
       return { risk: NEUTRAL_RISK, available: false };
     }
 
-    const artifact = await this.loader.artifact();
+    const artifact = await this.loader.getArtifact();
     await this.ensureCalibration(artifact.modelDir);
     return this.predictEncoded(artifact.tokenizer.encode(text), artifact);
   }
 
   async predictEncoded(
     encoding: Encoding,
-    artifact?: Awaited<ReturnType<OnnxModelLoader["artifact"]>>,
-  ): Promise<BinaryPrediction> {
+    artifact?: ModelArtifact,
+  ): Promise<ClassifierPrediction> {
     if (!(await this.isAvailable())) {
       return { risk: NEUTRAL_RISK, available: false };
     }
 
-    const loaded = artifact ?? (await this.loader.artifact());
+    const loaded = artifact ?? (await this.loader.getArtifact());
     await this.ensureCalibration(loaded.modelDir);
 
     const { ids, attentionMask } = encoding;
@@ -87,7 +87,7 @@ export class BinaryStage {
 
   async *encodeWindows(text: string, options: WindowOptions = {}): AsyncGenerator<TokenWindow> {
     if (!(await this.isAvailable())) return;
-    const artifact = await this.loader.artifact();
+    const artifact = await this.loader.getArtifact();
     yield* artifact.tokenizer.windows(text, options);
   }
 
@@ -127,7 +127,7 @@ async function loadTemperature(modelDir: string): Promise<TemperatureScaler> {
   }
 }
 
-export function softmax(logits: readonly number[]): number[] {
+function softmax(logits: readonly number[]): number[] {
   const max = Math.max(...logits);
   const exp = logits.map((v) => Math.exp(v - max));
   const sum = exp.reduce((a, b) => a + b, 0);

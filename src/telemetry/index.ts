@@ -17,7 +17,7 @@ import { BackgroundReporter, MultiReporter, NoopReporter, type Reporter } from "
 
 export * from "./config.js";
 export * from "./reporter.js";
-export { ReportingGuard } from "./reporting.js";
+export { ReportingGuard } from "./reporting-guard.js";
 export { langsmithRunPayload } from "./langsmith.js";
 
 /**

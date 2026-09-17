@@ -8,7 +8,7 @@ import {
   SPECIAL_TOKEN_BUDGET,
   estimateWindowCount,
   type WindowOptions,
-} from "../config.js";
+} from "../constants.js";
 
 export interface Encoding {
   ids: number[];

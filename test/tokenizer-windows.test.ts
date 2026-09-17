@@ -60,7 +60,7 @@ describeWithTokenizer("BastionTokenizer.windows", () => {
     expect(fromSlabs).toEqual(whole);
   });
 
-  it("reports an exact chunksTotal once the stream is drained", () => {
+  it("reports an exact windowsTotal once the stream is drained", () => {
     const text = "word ".repeat(5000);
     const windows = [...tok.windows(text)];
     const last = windows.at(-1);

@@ -7,14 +7,16 @@ import {
   type WindowOptions,
   LABEL_ATTACK,
   LABEL_SAFE,
-  STAGE_BINARY,
+  STAGE_CLASSIFIER,
   STAGE_HEURISTICS,
   modelId,
   resolveConfig,
 } from "./config.js";
-import { type LicenseStatus, verifyLicense } from "./license.js";
-import { BinaryStage } from "./stages/binary.js";
+import type { Guardable } from "./guardable.js";
+import { LicenseVerifier } from "./license.js";
+import { ClassifierStage } from "./stages/classifier.js";
 import { HeuristicsStage } from "./stages/heuristics.js";
+import { collapseWhitespace, roundTo } from "./utils.js";
 import { VERSION } from "./version.js";
 
 export interface GuardResult {
@@ -26,20 +28,20 @@ export interface GuardResult {
   readonly isAttack: boolean;
 }
 
-export interface ChunkedGuardResult extends GuardResult {
+export interface WindowedGuardResult extends GuardResult {
   /**
-   * Windows actually scanned. Fewer than `chunksTotal` when an early hit ended
-   * the scan, or when `maxChunks` capped it — compare the two to tell whether
+   * Windows actually scanned. Fewer than `windowsTotal` when an early hit ended
+   * the scan, or when `maxWindows` capped it — compare the two to tell whether
    * the whole input was covered.
    */
-  chunksScanned: number;
+  windowsScanned: number;
   /**
-   * Estimated windows covering the whole input. Exact once `chunksTotalExact`
+   * Estimated windows covering the whole input. Exact once `windowsTotalExact`
    * is true; otherwise extrapolated from observed token density.
    */
-  chunksTotal: number;
-  /** True when `chunksTotal` is exact rather than a density projection. */
-  chunksTotalExact: boolean;
+  windowsTotal: number;
+  /** True when `windowsTotal` is exact rather than a density projection. */
+  windowsTotalExact: boolean;
 }
 
 export interface ProtectOptions extends Partial<WindowOptions> {
@@ -47,12 +49,12 @@ export interface ProtectOptions extends Partial<WindowOptions> {
    * Stop after this many windows. Unlimited by default: the whole input is
    * scanned, since a cap silently reintroduces unexamined content. Set it to
    * bound worst-case work on untrusted input, and check
-   * `chunksScanned < chunksTotal` to detect partial coverage.
+   * `windowsScanned < windowsTotal` to detect partial coverage.
    *
-   * `maxChunks: 1` scans only the first model window — the same single-window
+   * `maxWindows: 1` scans only the first model window — the same single-window
    * behaviour as the Python package's `protect()`.
    */
-  maxChunks?: number;
+  maxWindows?: number;
   /**
    * Collapse runs of whitespace to a single ASCII space and trim before
    * scanning. Overrides the `normalizeWhitespace` setting on the `Guard`
@@ -63,21 +65,6 @@ export interface ProtectOptions extends Partial<WindowOptions> {
 }
 
 /**
- * Collapse runs of whitespace to a single ASCII space and trim.
- * Does not touch zero-width characters (U+200B, U+200C, etc.) — those are
- * not matched by \s and are caught by the heuristics stage as adversarial.
- */
-function collapseWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-/** Round half-away-from-zero to `digits` places, matching Python's `round()` on positives. */
-function roundTo(value: number, digits: number): number {
-  const f = 10 ** digits;
-  return Math.round(value * f) / f;
-}
-
-/**
  * Two-stage prompt-injection detector.
  *
  * Note on async: Python's `Guard.protect()` is synchronous. In Node the model
@@ -85,10 +72,10 @@ function roundTo(value: number, digits: number): number {
  * returns a Promise. Everything else — thresholds, ordering, rounding — matches
  * the Python pipeline exactly.
  */
-export class Guard {
+export class Guard implements Guardable {
   readonly config: GuardConfig;
   private readonly heuristics: HeuristicsStage | null;
-  private readonly binary: BinaryStage | null;
+  private readonly classifier: ClassifierStage | null;
 
   constructor(init: GuardConfigInit | Preset = {}) {
     this.config = resolveConfig(typeof init === "string" ? { preset: init } : init);
@@ -104,8 +91,12 @@ export class Guard {
     }
 
     this.heuristics = this.config.enableHeuristics ? new HeuristicsStage() : null;
-    this.binary = this.config.enableBinary
-      ? new BinaryStage(modelId(this.config, "binary"), this.config.cacheDir, this.config.hfToken)
+    this.classifier = this.config.enableClassifier
+      ? new ClassifierStage(
+          modelId(this.config, "classifier"),
+          this.config.cacheDir,
+          this.config.hfToken,
+        )
       : null;
   }
 
@@ -118,10 +109,10 @@ export class Guard {
    * Identifier for the currently loaded model build (7-char commit SHA of the
    * HuggingFace snapshot under the hood). Returns null if the model hasn't been
    * loaded yet — lazy load triggers on the first `protect()` call — or if the
-   * binary stage is disabled. Useful for audit logs and bug reports.
+   * classifier stage is disabled. Useful for audit logs and bug reports.
    */
   get modelVersion(): string | null {
-    return this.binary === null ? null : this.binary.modelVersion;
+    return this.classifier === null ? null : this.classifier.modelVersion;
   }
 
   /**
@@ -129,34 +120,34 @@ export class Guard {
    * `config.licensePath` or the default locations. Non-blocking — read it for
    * audit/logging. The free TINY model needs no license.
    */
-  licenseStatus(): LicenseStatus {
-    return verifyLicense(this.config.licensePath);
+  licenseStatus() {
+    return new LicenseVerifier(this.config.licensePath).verify();
   }
 
   /**
-   * Scan one window of text through the binary stage.
+   * Scan one window of text through the classifier stage.
    *
    * Heuristics run once on the full input in `protect()` before windowing.
    * Deliberately isolated from windowing so scores stay bit-identical to the
-   * Python package's `protect()` when `maxChunks: 1`.
+   * Python package's `protect()` when `maxWindows: 1`.
    */
-  private async _scan(prompt: string): Promise<GuardResult> {
+  private async scanWindow(prompt: string): Promise<GuardResult> {
     const start = performance.now();
-    const text = (prompt ?? "").slice(0, this.config.maxInputChars);
+    const text = prompt.slice(0, this.config.maxInputChars);
 
-    let binaryRisk = 0.0;
-    let binaryAvailable = false;
-    if (this.binary !== null) {
-      const pred = await this.binary.predict(text);
+    let classifierRisk = 0.0;
+    let classifierAvailable = false;
+    if (this.classifier !== null) {
+      const pred = await this.classifier.predict(text);
       if (pred.available) {
-        binaryRisk = pred.risk;
-        binaryAvailable = true;
+        classifierRisk = pred.risk;
+        classifierAvailable = true;
       }
     }
 
-    const stage = binaryAvailable ? STAGE_BINARY : STAGE_HEURISTICS;
+    const stage = classifierAvailable ? STAGE_CLASSIFIER : STAGE_HEURISTICS;
 
-    return this.finalize(binaryRisk, stage, start);
+    return this.finalize(classifierRisk, stage, start);
   }
 
   /**
@@ -164,14 +155,14 @@ export class Guard {
    *
    * By default the input is split into overlapping token windows and every
    * window is scanned, stopping early once a window reaches
-   * `thresholds.attackAbove`. Pass `{ maxChunks: 1 }` to scan only the first
+   * `thresholds.attackAbove`. Pass `{ maxWindows: 1 }` to scan only the first
    * model window — the Python-parity single-window mode.
    */
-  async protect(prompt: string, options: ProtectOptions = {}): Promise<ChunkedGuardResult> {
+  async protect(prompt: string, options: ProtectOptions = {}): Promise<WindowedGuardResult> {
     const start = performance.now();
 
     const shouldNormalize = options.normalizeWhitespace ?? this.config.normalizeWhitespace;
-    const input = shouldNormalize ? collapseWhitespace(prompt ?? "") : (prompt ?? "");
+    const input = shouldNormalize ? collapseWhitespace(prompt) : prompt;
     const bounded = input.slice(0, this.config.maxInputChars);
 
     if (this.heuristics !== null) {
@@ -180,40 +171,40 @@ export class Guard {
         const base = this.finalize(heuristicScore, STAGE_HEURISTICS, start);
         return {
           ...base,
-          chunksScanned: 0,
-          chunksTotal: 0,
-          chunksTotalExact: true,
+          windowsScanned: 0,
+          windowsTotal: 0,
+          windowsTotalExact: true,
         };
       }
     }
 
-    if (options.maxChunks === 1) {
-      const base = await this._scan(bounded);
+    if (options.maxWindows === 1) {
+      const base = await this.scanWindow(bounded);
       return {
         ...base,
-        chunksScanned: 1,
-        chunksTotal: 1,
-        chunksTotalExact: true,
+        windowsScanned: 1,
+        windowsTotal: 1,
+        windowsTotalExact: true,
       };
     }
 
-    if (this.binary === null || bounded.length === 0) {
-      const base = await this._scan(bounded);
+    if (this.classifier === null || bounded.length === 0) {
+      const base = await this.scanWindow(bounded);
       return {
         ...base,
-        chunksScanned: 0,
-        chunksTotal: 0,
-        chunksTotalExact: true,
+        windowsScanned: 0,
+        windowsTotal: 0,
+        windowsTotalExact: true,
       };
     }
 
-    if (!(await this.binary.isAvailable())) {
-      const base = await this._scan(bounded);
+    if (!(await this.classifier.isAvailable())) {
+      const base = await this.scanWindow(bounded);
       return {
         ...base,
-        chunksScanned: 0,
-        chunksTotal: 0,
-        chunksTotalExact: true,
+        windowsScanned: 0,
+        windowsTotal: 0,
+        windowsTotalExact: true,
       };
     }
 
@@ -222,52 +213,52 @@ export class Guard {
       windowTokens: options.windowTokens,
       slabChars: options.slabChars,
     };
-    const limit = options.maxChunks ?? Number.POSITIVE_INFINITY;
+    const limit = options.maxWindows ?? Number.POSITIVE_INFINITY;
 
     let worst: GuardResult | null = null;
     let scanned = 0;
-    let chunksTotal = 1;
-    let chunksTotalExact = false;
+    let windowsTotal = 1;
+    let windowsTotalExact = false;
 
-    for await (const window of this.binary.encodeWindows(bounded, windowOpts)) {
+    for await (const window of this.classifier.encodeWindows(bounded, windowOpts)) {
       if (scanned >= limit) break;
       scanned += 1;
-      chunksTotal = window.estimatedTotal;
-      chunksTotalExact = window.exact;
+      windowsTotal = window.estimatedTotal;
+      windowsTotalExact = window.exact;
 
-      const pred = await this.binary.predictEncoded(window.encoding);
+      const pred = await this.classifier.predictEncoded(window.encoding);
       if (!pred.available) {
-        const base = await this._scan(bounded);
+        const base = await this.scanWindow(bounded);
         return {
           ...base,
-          chunksScanned: 0,
-          chunksTotal: 0,
-          chunksTotalExact: true,
+          windowsScanned: 0,
+          windowsTotal: 0,
+          windowsTotalExact: true,
         };
       }
 
-      const result = this.finalize(pred.risk, STAGE_BINARY, performance.now());
+      const result = this.finalize(pred.risk, STAGE_CLASSIFIER, start);
       if (worst === null || result.risk > worst.risk) worst = result;
       if (worst.risk >= this.config.thresholds.attackAbove) break;
     }
 
     if (scanned === 0) {
-      const base = await this._scan(bounded);
+      const base = await this.scanWindow(bounded);
       return {
         ...base,
-        chunksScanned: 0,
-        chunksTotal: 0,
-        chunksTotalExact: true,
+        windowsScanned: 0,
+        windowsTotal: 0,
+        windowsTotalExact: true,
       };
     }
 
-    const base = worst ?? (await this._scan(bounded));
+    const base = worst ?? (await this.scanWindow(bounded));
     return {
       ...base,
       latencyMs: roundTo(performance.now() - start, 3),
-      chunksScanned: scanned,
-      chunksTotal,
-      chunksTotalExact,
+      windowsScanned: scanned,
+      windowsTotal,
+      windowsTotalExact,
     };
   }
 

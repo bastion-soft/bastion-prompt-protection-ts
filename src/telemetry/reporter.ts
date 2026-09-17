@@ -6,11 +6,6 @@
  * batched, fire-and-forget, bounded queue with drop-on-overflow, retry+backoff,
  * flush on shutdown, optional sampling that always keeps flagged/blocked.
  * **It never adds latency to, or raises into, the request path.**
- *
- * Python backs this with a daemon thread and a blocking `queue.Queue`. Node has
- * no threads here, so the same contract is met with an array-backed bounded
- * queue and an `unref()`'d interval timer — unref'd so a configured reporter
- * never keeps a short-lived process alive.
  */
 
 // Where a detection was caught — mirrors the gateway ScanContext.
@@ -21,10 +16,17 @@ export const ORIGIN_RAG_DOCUMENT = "rag_document";
 export const ORIGIN_TOOL_RESULT = "tool_result";
 export const ORIGIN_AGENT_STEP = "agent_step";
 
+export type ReportVector = typeof VECTOR_DIRECT | typeof VECTOR_INDIRECT;
+export type ReportOrigin =
+  | typeof ORIGIN_USER_PROMPT
+  | typeof ORIGIN_RAG_DOCUMENT
+  | typeof ORIGIN_TOOL_RESULT
+  | typeof ORIGIN_AGENT_STEP;
+
 /** Provenance for one detection, supplied by the integration that caught it. */
 export interface ReportContext {
-  vector?: string;
-  origin?: string;
+  vector?: ReportVector;
+  origin?: ReportOrigin;
   /** input | output (output-side screening) */
   direction?: string;
   /** integration tag: litellm/langchain/llamaindex/… */
@@ -184,12 +186,18 @@ export class MultiReporter implements Reporter {
   }
 }
 
+export interface TelemetryDefaults {
+  clientId?: string;
+  source?: string;
+  environment?: string;
+}
+
 /**
  * Build the wire record from a detection + its provenance + the guard's
  * metadata. Pure helper — `guard` is only read for version/preset, so neither
  * Guard nor the integrations depend on the reporter to produce a record.
  */
-export function makeRecord(
+export function buildTelemetryRecord(
   result: {
     risk: number;
     label: string;
@@ -202,6 +210,7 @@ export function makeRecord(
     sdkVersion?: string;
     config?: { preset?: string };
   },
+  defaults: TelemetryDefaults = {},
 ): TelemetryRecord {
   const record: TelemetryRecord = {
     risk: result.risk,
@@ -210,14 +219,18 @@ export function makeRecord(
     vector: context.vector ?? VECTOR_DIRECT,
     origin: context.origin ?? ORIGIN_USER_PROMPT,
     direction: context.direction ?? "input",
-    source: context.source ?? null,
+    source: context.source ?? defaults.source ?? null,
     request_id: context.requestId ?? null,
-    client_id: context.clientId ?? null,
+    client_id: context.clientId ?? defaults.clientId ?? null,
     model_version: guard.modelVersion ?? null,
     sdk_version: guard.sdkVersion ?? null,
     preset: guard.config?.preset ?? null,
     latency_ms: result.latencyMs,
   };
+  const environment = defaults.environment;
+  if (environment !== undefined && environment !== null && environment !== "") {
+    record.environment = environment;
+  }
   if (context.content !== undefined && context.content !== null) {
     record.prompt = context.content;
   }
