@@ -5,6 +5,8 @@ import type { GuardResult } from "./types.js";
  *
  * The core `Guard.protect()` never throws this — it returns a result. This
  * exists so integrations and application code have one shared error type.
+ *
+ * TODO(X6): document that Guard never throws this; result includes window fields.
  */
 export class PromptInjectionError extends Error {
   readonly result: GuardResult;

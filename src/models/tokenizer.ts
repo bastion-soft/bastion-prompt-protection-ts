@@ -5,17 +5,28 @@ import {
   DEFAULT_TOKEN_OVERLAP,
   MODEL_TOKEN_WINDOW,
   SPECIAL_TOKEN_BUDGET,
-  estimateWindowCount,
 } from "../constants.js";
+
+/** Estimate how many windows cover a token stream of the given length. */
+function estimateWindowCount(
+  tokenCount: number,
+  contentWindow = CONTENT_TOKEN_WINDOW,
+  overlapTokens = DEFAULT_TOKEN_OVERLAP,
+): number {
+  if (tokenCount <= 0) return 0;
+  if (tokenCount <= contentWindow) return 1;
+  const step = Math.max(1, contentWindow - overlapTokens);
+  return Math.ceil((tokenCount - contentWindow) / step) + 1;
+}
 import type { WindowOptions } from "../types.js";
 
-export interface Encoding {
+export interface TokenEncoding {
   ids: number[];
   attentionMask: number[];
 }
 
 export interface TokenWindow {
-  encoding: Encoding;
+  encoding: TokenEncoding;
   /** Estimated windows covering the whole input; exact once `windowsTotalExact` is true. */
   windowsTotal: number;
   /** True when the estimate is exact (stream fully tokenized). */
@@ -73,7 +84,7 @@ function* slabify(text: string, slabChars: number = DEFAULT_SLAB_CHARS): Generat
  * trailing special token. Verified byte-identical against Python across the
  * full parity corpus.
  */
-export class BastionTokenizer {
+export class SlabWindowTokenizer {
   private readonly tokenizer: Tokenizer;
   readonly maxLength: number | null;
   private readonly clsId: number;
@@ -94,7 +105,7 @@ export class BastionTokenizer {
     this.sepId = specialIds[specialIds.length - 1] as number;
   }
 
-  encode(text: string): Encoding {
+  encode(text: string): TokenEncoding {
     const enc = this.parseEncoding(this.tokenizer.encode(text));
     let ids = enc.ids;
     let attentionMask = enc.attentionMask;
@@ -148,7 +159,7 @@ export class BastionTokenizer {
       return estimateWindowCount(projectedTokens, contentWindow, overlapTokens);
     };
 
-    const wrap = (content: readonly number[]): Encoding => {
+    const wrap = (content: readonly number[]): TokenEncoding => {
       const ids = [this.clsId, ...content, this.sepId];
       return { ids, attentionMask: new Array(ids.length).fill(1) };
     };
@@ -199,4 +210,4 @@ export class BastionTokenizer {
 }
 
 /** @internal Used by tokenizer window tests. */
-export { slabify, CONTENT_TOKEN_WINDOW };
+export { slabify, estimateWindowCount, CONTENT_TOKEN_WINDOW };

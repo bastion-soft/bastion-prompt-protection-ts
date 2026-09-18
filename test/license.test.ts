@@ -49,7 +49,7 @@ describe("verifyLicense", () => {
   });
 
   it("rejects a license with no signature", () => {
-    const status = verifyLicense(BASE, { publicKeyB64 });
+    const status = verifyLicense(BASE, publicKeyB64);
     expect(status.valid).toBe(false);
     expect(status.reason).toBe("license has no signature");
     // Metadata is still surfaced for audit logging.
@@ -58,7 +58,7 @@ describe("verifyLicense", () => {
   });
 
   it("accepts a correctly signed license", () => {
-    const status = verifyLicense(signLicense(BASE), { publicKeyB64 });
+    const status = verifyLicense(signLicense(BASE), publicKeyB64);
     expect(status.valid).toBe(true);
     expect(status.reason).toBe("valid");
     expect(status.tier).toBe("enterprise");
@@ -68,7 +68,7 @@ describe("verifyLicense", () => {
   it("rejects a tampered license", () => {
     const signed = signLicense(BASE);
     signed.tier = "free";
-    const status = verifyLicense(signed, { publicKeyB64 });
+    const status = verifyLicense(signed, publicKeyB64);
     expect(status.valid).toBe(false);
     expect(status.reason).toBe("signature verification failed");
   });
@@ -79,7 +79,7 @@ describe("verifyLicense", () => {
       .export({ format: "der", type: "spki" })
       .subarray(12)
       .toString("base64");
-    const status = verifyLicense(signLicense(BASE), { publicKeyB64: otherB64 });
+    const status = verifyLicense(signLicense(BASE), otherB64);
     expect(status.valid).toBe(false);
     expect(status.reason).toBe("signature verification failed");
   });
@@ -87,7 +87,7 @@ describe("verifyLicense", () => {
   it("rejects an expired but correctly signed license", () => {
     const status = verifyLicense(
       signLicense({ ...BASE, valid_until: "2020-01-01T00:00:00+00:00" }),
-      { publicKeyB64 },
+      publicKeyB64,
     );
     expect(status.valid).toBe(false);
     expect(status.reason).toBe("license expired");
@@ -95,23 +95,22 @@ describe("verifyLicense", () => {
   });
 
   it("does not fail closed on an unparseable expiry", () => {
-    const status = verifyLicense(signLicense({ ...BASE, valid_until: "not-a-date" }), {
-      publicKeyB64,
-    });
+    const status = verifyLicense(signLicense({ ...BASE, valid_until: "not-a-date" }), publicKeyB64);
     expect(status.valid).toBe(true);
   });
 
   it("treats a naive timestamp as UTC, not local time", () => {
     // Python pins naive timestamps to UTC; JS `Date` would read them as local.
-    const status = verifyLicense(signLicense({ ...BASE, valid_until: "2099-01-01T00:00:00" }), {
+    const status = verifyLicense(
+      signLicense({ ...BASE, valid_until: "2099-01-01T00:00:00" }),
       publicKeyB64,
-    });
+    );
     expect(status.valid).toBe(true);
   });
 
   it("loads a license from a file path", () => {
     const file = writeTempLicense(signLicense(BASE));
-    expect(verifyLicense(file, { publicKeyB64 }).valid).toBe(true);
+    expect(verifyLicense(file, publicKeyB64).valid).toBe(true);
   });
 });
 

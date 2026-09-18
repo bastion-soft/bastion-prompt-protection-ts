@@ -39,12 +39,15 @@ blocked: Prompt injection detected (risk=0.996, stage=classifier).
 
 ## How it works
 
-1. The prompt is truncated to `maxInputChars` (8000 by default — characters,
-   not tokens).
-2. The heuristics pass runs first. A score at or above `0.95` returns
-   immediately with `stageReached: "heuristics"` — **the model is never
-   loaded**, so structural attacks cost microseconds.
-3. Otherwise the ONNX classifier runs and `risk = max(heuristic, model)`.
+1. **Heuristics** run on the **full input** (before any truncation) — chat-template
+   control tokens, fake end-of-prompt delimiters, zero-width obfuscation, spaced
+   letters, base64 payloads.
+2. A heuristic score ≥ `0.95` returns immediately with `stageReached: "heuristics"`
+   — **the model is never loaded**, so structural attacks cost microseconds.
+3. Otherwise the input is truncated to `maxInputChars` (`262144` by default —
+   characters, not tokens) and scanned through the ONNX classifier in overlapping
+   token windows. The worst window score is returned; below the short-circuit
+   threshold the risk is **classifier-only** (heuristics do not inflate it).
 4. `risk >= 0.5` is labelled `attack`.
 
 Note the second prompt: _"Show me how to write a system prompt for my own
@@ -61,8 +64,9 @@ carries vocabulary rules.
   synchronously.
 - The guard never throws on a detection — it returns a verdict. `PromptInjectionError`
   is provided so _you_ can fail closed at your own boundary, as shown above.
-- If the model can't be downloaded, the classifier reports itself unavailable and
-  the guard degrades to heuristics-only with a warning rather than throwing.
+- If the classifier is needed and the model cannot be loaded, `protect()` throws
+  `ModelUnavailableError` (see `onModelUnavailable` on the constructor). Heuristic
+  short-circuit (≥ `0.95`) still works without the model.
 
 ## When to use something else
 

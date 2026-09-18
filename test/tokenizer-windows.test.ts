@@ -1,24 +1,41 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { getHFHubCachePath, getRepoFolderName } from "@huggingface/hub";
 import {
   CONTENT_TOKEN_WINDOW,
   DEFAULT_SLAB_CHARS,
   DEFAULT_TOKEN_OVERLAP,
-  estimateWindowCount,
   MODEL_TOKEN_WINDOW,
 } from "../src/constants.js";
-import { BastionTokenizer, slabify } from "../src/models/tokenizer.js";
+import { SlabWindowTokenizer, estimateWindowCount, slabify } from "../src/models/tokenizer.js";
 
-const TOKENIZER_DIR =
-  "/home/mantas/.cache/huggingface/hub/models--bastionsoft--binary-bastion-prompt-protection-deberta-v3-xsmall-v1/snapshots/3a5bbe0e8eadf86213378e4806da42a1a3177df8";
+const REPO_ID = "bastionsoft/binary-bastion-prompt-protection-deberta-v3-xsmall-v1";
 
-function loadTokenizer(): BastionTokenizer | null {
+function findCachedTokenizerDir(): string | null {
   try {
-    const tokenizerJson = JSON.parse(readFileSync(`${TOKENIZER_DIR}/tokenizer.json`, "utf-8"));
-    const tokenizerConfig = JSON.parse(
-      readFileSync(`${TOKENIZER_DIR}/tokenizer_config.json`, "utf-8"),
+    const snapshots = path.join(
+      getHFHubCachePath(),
+      getRepoFolderName({ type: "model", name: REPO_ID }),
+      "snapshots",
     );
-    return new BastionTokenizer(tokenizerJson, tokenizerConfig);
+    const entries = readdirSync(snapshots);
+    const sha = entries.find((e) => /^[0-9a-f]{40}$/.test(e));
+    return sha ? path.join(snapshots, sha) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadTokenizer(): SlabWindowTokenizer | null {
+  const tokenizerDir = findCachedTokenizerDir();
+  if (tokenizerDir === null) return null;
+  try {
+    const tokenizerJson = JSON.parse(readFileSync(`${tokenizerDir}/tokenizer.json`, "utf-8"));
+    const tokenizerConfig = JSON.parse(
+      readFileSync(`${tokenizerDir}/tokenizer_config.json`, "utf-8"),
+    );
+    return new SlabWindowTokenizer(tokenizerJson, tokenizerConfig);
   } catch {
     return null;
   }
@@ -71,8 +88,8 @@ describe("slabify", () => {
   });
 });
 
-describeWithTokenizer("BastionTokenizer.windows", () => {
-  const tok = tokenizer as BastionTokenizer;
+describeWithTokenizer("SlabWindowTokenizer.windows", () => {
+  const tok = tokenizer as SlabWindowTokenizer;
 
   it("yields no windows for empty input", () => {
     expect([...tok.windows("")]).toEqual([]);

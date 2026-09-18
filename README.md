@@ -43,10 +43,14 @@ same model, same thresholds, same scores.
    structural attacks cost microseconds.
 3. Otherwise the input is truncated to `maxInputChars` (characters, not tokens)
    and scanned through the ONNX classifier in overlapping token windows; the
-   worst window score is returned.
+   worst window score is returned. Below the heuristic short-circuit threshold,
+   the returned risk is **classifier-only** — heuristics gate the early return
+   but do not inflate the classifier score.
 
-If the weights can't be downloaded, the classifier reports itself unavailable and
-the guard degrades to heuristics-only with a warning rather than throwing.
+If the classifier is needed and the weights cannot be loaded, `protect()` throws
+`ModelUnavailableError`. Structural attacks that score ≥ `0.95` on heuristics
+still return immediately without the model. See `onModelUnavailable` for retry
+vs permanent-throw behaviour.
 
 ## API
 
@@ -65,6 +69,8 @@ the guard degrades to heuristics-only with a warning rather than throwing.
 | `cacheDir`                         |           — | Override the model cache location                            |
 | `hfToken`                          |           — | HuggingFace token; defaults to `$HF_TOKEN`                   |
 | `licensePath` / `requireLicense`   | — / `false` | Offline commercial-license checks                            |
+| `onModelUnavailable`               | `"try-download-then-throw"` | `"throw"` for permanent failure after first miss |
+| `normalizeWhitespace`              |      `true` | Collapse `\s+` to one space before scanning                |
 
 `protect(prompt)` resolves to
 `{ risk, label, stageReached, latencyMs, isAttack }`. `risk` is rounded to 4
@@ -72,7 +78,7 @@ decimals, `latencyMs` to 3.
 
 Also on the instance: `guard.sdkVersion`, `guard.modelVersion` (7-character
 model-snapshot id, `null` until first use — worth recording in audit logs), and
-`guard.licenseStatus()`.
+`guard.licenseStatus`.
 
 ### `protect(prompt, options?)` — documents and tool results
 
@@ -93,11 +99,13 @@ const result = await guard.protect(document);
 | `overlapTokens` |       `64` | Content tokens repeated from the previous window |
 | `maxWindows`    | _no limit_ | Stop after this many windows                     |
 
-Pass `{ maxWindows: 1 }` for Python-parity single-window mode (first 512 tokens
-only). It stops at the first window over the threshold, so **clean content is
-the expensive case** — every window is scanned. Compare `windowsScanned` with
-`windowsTotal` to tell whether the whole input was covered; when
-`windowsTotalExact` is false, `windowsTotal` is a density-based estimate.
+Pass `{ maxWindows: 1 }` to scan only the first sliding window. Both Python and
+TypeScript default to full window coverage; use this opt-in when you want to
+bound work. With the default (no limit), scanning stops at the first window
+over the threshold, so **clean content is the expensive case** — every window
+is scanned. Compare
+`windowsScanned` with `windowsTotal` to tell whether the whole input was covered;
+when `windowsTotalExact` is false, `windowsTotal` is a density-based estimate.
 
 Constants are exported as `MODEL_TOKEN_WINDOW`, `CONTENT_TOKEN_WINDOW`,
 `DEFAULT_TOKEN_OVERLAP`, `DEFAULT_SLAB_CHARS`, and `DEFAULT_MAX_INPUT_CHARS`.
@@ -162,7 +170,7 @@ free `tiny` model is public and needs no token.
 
 ```ts
 const guard = new Guard({ preset: "multilingual", requireLicense: true });
-guard.licenseStatus();
+guard.licenseStatus;
 // { valid: true, reason: "valid", licenseId: "…", tier: "enterprise",
 //   company: "…", validUntil: "…", expired: false }
 ```

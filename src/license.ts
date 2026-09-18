@@ -34,18 +34,6 @@ export interface LicenseStatus {
   expired: boolean;
 }
 
-function readString(data: Record<string, unknown>, key: string): string | null {
-  const value = data[key];
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function readCompanyName(data: Record<string, unknown>): string | null {
-  const customer = data.customer;
-  if (customer === null || typeof customer !== "object") return null;
-  const company = (customer as Record<string, unknown>).company_name;
-  return typeof company === "string" && company.length > 0 ? company : null;
-}
-
 /**
  * Offline Ed25519 license verification.
  *
@@ -84,7 +72,7 @@ export class LicenseVerifier {
       return this.status(false, "signature verification failed", data);
     }
 
-    const validUntil = readString(data, "valid_until");
+    const validUntil = LicenseVerifier.readString(data, "valid_until");
     if (validUntil !== null) {
       const expiry = parseIsoUtc(validUntil);
       // An unparseable date must not fail a signature-valid license closed.
@@ -130,19 +118,31 @@ export class LicenseVerifier {
     return {
       valid,
       reason,
-      licenseId: data === null ? null : readString(data, "license_id"),
-      tier: data === null ? null : readString(data, "tier"),
-      company: data === null ? null : readCompanyName(data),
-      validUntil: data === null ? null : readString(data, "valid_until"),
+      licenseId: data === null ? null : LicenseVerifier.readString(data, "license_id"),
+      tier: data === null ? null : LicenseVerifier.readString(data, "tier"),
+      company: data === null ? null : LicenseVerifier.readCompanyName(data),
+      validUntil: data === null ? null : LicenseVerifier.readString(data, "valid_until"),
       expired,
     };
+  }
+
+  private static readString(data: Record<string, unknown>, key: string): string | null {
+    const value = data[key];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  }
+
+  private static readCompanyName(data: Record<string, unknown>): string | null {
+    const customer = data.customer;
+    if (customer === null || typeof customer !== "object") return null;
+    const company = (customer as Record<string, unknown>).company_name;
+    return typeof company === "string" && company.length > 0 ? company : null;
   }
 }
 
 /** Convenience wrapper around {@link LicenseVerifier}. */
 export function verifyLicense(
   source?: Record<string, unknown> | string,
-  options: { publicKeyB64?: string } = {},
+  publicKeyB64?: string,
 ): LicenseStatus {
-  return new LicenseVerifier(source, options.publicKeyB64).verify();
+  return new LicenseVerifier(source, publicKeyB64).verify();
 }

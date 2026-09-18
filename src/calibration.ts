@@ -48,34 +48,36 @@ export class TemperatureScaler {
     modelDir: string,
     labels: readonly string[] = [],
   ): Promise<TemperatureScaler> {
-    const attackClassIndex = resolveAttackClassIndex(labels);
+    const attackClassIndex = TemperatureScaler.resolveAttackClassIndex(labels);
     const file = path.join(modelDir, "temperature.json");
-    let payload: { temperature?: unknown };
+    let payload: unknown;
     try {
       payload = JSON.parse(await readFile(file, "utf-8"));
     } catch {
       return new TemperatureScaler(1.0, attackClassIndex);
     }
-    try {
-      const temperature = Number(payload.temperature);
-      if (!Number.isFinite(temperature) || temperature <= 0) {
-        throw new Error(`temperature must be > 0, got ${String(payload.temperature)}`);
-      }
-      return new TemperatureScaler(temperature, attackClassIndex);
-    } catch (err) {
+
+    const raw =
+      typeof payload === "object" && payload !== null
+        ? (payload as { temperature?: unknown }).temperature
+        : undefined;
+    const temperature = Number(raw);
+    if (!Number.isFinite(temperature) || temperature <= 0) {
+      // TODO(X5): library code should not write to stdout; inject a logger instead
       console.warn(
         `bastion-prompt-protection: could not load temperature.json ` +
-          `(${err instanceof Error ? err.message : String(err)}); falling back to identity scaling`,
+          `(temperature must be a number > 0, got ${String(raw)}); falling back to identity scaling`,
       );
       return new TemperatureScaler(1.0, attackClassIndex);
     }
+    return new TemperatureScaler(temperature, attackClassIndex);
   }
-}
 
-function resolveAttackClassIndex(labels: readonly string[]): number {
-  const attackIdx = labels.findIndex(
-    (label) => label.toLowerCase() === "attack" || label === "1",
-  );
-  if (attackIdx >= 0) return attackIdx;
-  return labels.length > 1 ? DEFAULT_ATTACK_CLASS_INDEX : 0;
+  private static resolveAttackClassIndex(labels: readonly string[]): number {
+    const attackIdx = labels.findIndex(
+      (label) => label.toLowerCase() === "attack" || label === "1",
+    );
+    if (attackIdx >= 0) return attackIdx;
+    return labels.length > 1 ? DEFAULT_ATTACK_CLASS_INDEX : 0;
+  }
 }

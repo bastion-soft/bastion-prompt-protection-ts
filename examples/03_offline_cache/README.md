@@ -26,11 +26,11 @@ node examples/03_offline_cache/main.mjs
 
 ```
 Model cached under: /your/path/examples/03_offline_cache/.bastion-cache
-  risk=0.9853  label=attack  stage=binary
+  risk=0.9853  label=attack  stage=classifier
   modelVersion=3a5bbe0
 
 Re-running with HF_HUB_OFFLINE=1 ...
-  risk=0.9927  label=attack  stage=binary
+  risk=0.9927  label=attack  stage=classifier
   risk=0.97  label=attack  stage=heuristics
 ```
 
@@ -67,8 +67,10 @@ CMD ["node", "server.mjs"]
   package — or by `huggingface-cli download` — is reused as-is.
 - Pin the snapshot you shipped by recording `guard.modelVersion` in your audit
   logs; it's the 7-character prefix of the commit SHA actually loaded.
-- The heuristics stage needs no weights, so structural attacks are still caught
-  even if the model is genuinely unavailable.
+- A complete cached snapshot loads with **zero Hub calls** — `HF_HUB_OFFLINE=1`
+  is belt-and-braces for CI/Docker, not required on a warm cache.
+- Heuristic short-circuit (≥ `0.95`) needs no model weights. If the classifier
+  is required and unavailable, `protect()` throws `ModelUnavailableError`.
 
 ## When to use something else
 

@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   downloadFileToCacheDir,
@@ -11,21 +11,21 @@ import {
 import type { InferenceSession, Tensor } from "onnxruntime-node";
 import { ModelUnavailableError } from "../errors.js";
 import type { ModelUnavailableMode } from "../types.js";
-import { BastionTokenizer } from "./tokenizer.js";
+import { SlabWindowTokenizer } from "./tokenizer.js";
 
 export interface ModelArtifact {
   session: InferenceSession;
-  tokenizer: BastionTokenizer;
+  tokenizer: SlabWindowTokenizer;
   labels: string[];
   modelDir: string;
   /** ONNX graph input names, used to decide whether to feed token_type_ids. */
   inputNames: string[];
   /** Cached after first load so inference does not re-import onnxruntime-node. */
-  createTensor: typeof Tensor;
+  TensorClass: typeof Tensor;
 }
 
 export interface OnnxModelLoaderOptions {
-  repoId: string;
+  modelId: string;
   onModelUnavailable: ModelUnavailableMode;
   cacheDir?: string;
   hfToken?: string;
@@ -66,6 +66,24 @@ function matchesAny(name: string, patterns: readonly string[]): boolean {
   return patterns.some((p) => fnmatch(name, p));
 }
 
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function snapshotIsLoadable(snapshotDir: string): Promise<boolean> {
+  const tokenizerOk = await fileExists(path.join(snapshotDir, "tokenizer.json"));
+  if (!tokenizerOk) return false;
+  for (const rel of ONNX_CANDIDATES) {
+    if (await fileExists(path.join(snapshotDir, rel))) return true;
+  }
+  return false;
+}
+
 /**
  * Lazy loader for ONNX classifier artifacts published on the HF Hub.
  *
@@ -80,23 +98,23 @@ function matchesAny(name: string, patterns: readonly string[]): boolean {
  *   `load()` call throws immediately with no retry.
  */
 export class OnnxModelLoader {
-  private artifactValue: ModelArtifact | null = null;
-  private failure: { error: Error; at: number } | null = null;
+  private artifact: ModelArtifact | null = null;
+  private failure: { error: Error; failedAt: number } | null = null;
   private loadPromise: Promise<ModelArtifact> | null = null;
 
   constructor(private readonly options: OnnxModelLoaderOptions) {}
 
-  get repoId(): string {
-    return this.options.repoId;
+  get modelId(): string {
+    return this.options.modelId;
   }
 
   /**
    * HF commit SHA the loaded snapshot resolved to, or null if the model has not
    * been loaded yet. Does NOT trigger loading.
    */
-  get snapshotSha(): string | null {
-    if (this.artifactValue === null) return null;
-    return path.basename(this.artifactValue.modelDir);
+  get snapshotRevision(): string | null {
+    if (this.artifact === null) return null;
+    return path.basename(this.artifact.modelDir);
   }
 
   /**
@@ -104,17 +122,17 @@ export class OnnxModelLoader {
    * Throws `ModelUnavailableError` when the model is not available.
    */
   async load(): Promise<ModelArtifact> {
-    if (this.artifactValue !== null) return this.artifactValue;
+    if (this.artifact !== null) return this.artifact;
 
     if (this.failure !== null) {
       if (this.options.onModelUnavailable === "throw") {
-        throw new ModelUnavailableError(this.repoId, this.failure.error);
+        throw new ModelUnavailableError(this.modelId, this.failure.error);
       }
-      const elapsed = Date.now() - this.failure.at;
+      const elapsed = Date.now() - this.failure.failedAt;
       if (elapsed < RETRY_COOLDOWN_MS) {
         const remainingSec = Math.ceil((RETRY_COOLDOWN_MS - elapsed) / 1000);
         throw new ModelUnavailableError(
-          this.repoId,
+          this.modelId,
           this.failure.error,
           `retry in ${remainingSec}s`,
         );
@@ -124,50 +142,63 @@ export class OnnxModelLoader {
     }
 
     try {
-      this.artifactValue = await this.startLoad();
-      return this.artifactValue;
+      this.artifact = await this.loadOnce();
+      return this.artifact;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      this.failure = { error, at: Date.now() };
+      this.failure = { error, failedAt: Date.now() };
       this.loadPromise = null;
-      throw new ModelUnavailableError(this.repoId, error);
+      throw new ModelUnavailableError(this.modelId, error);
     }
   }
 
-  private startLoad(): Promise<ModelArtifact> {
-    this.loadPromise ??= this.doLoad();
+  private loadOnce(): Promise<ModelArtifact> {
+    this.loadPromise ??= this.loadFromCacheOrHub();
     return this.loadPromise;
   }
 
-  private async doLoad(): Promise<ModelArtifact> {
-    const repo = { type: "model", name: this.repoId } as const;
-
+  private async loadFromCacheOrHub(): Promise<ModelArtifact> {
+    const repo = { type: "model", name: this.modelId } as const;
     const auth = this.options.hfToken ? { accessToken: this.options.hfToken } : {};
 
+    const { sha, files } = await this.resolveSnapshotFiles(repo, auth);
+    const downloaded = await this.downloadArtifacts(repo, sha, files, auth);
+    return this.buildArtifact(downloaded);
+  }
+
+  private async resolveSnapshotFiles(
+    repo: { type: "model"; name: string },
+    auth: { accessToken?: string },
+  ): Promise<{ sha: string; files: string[] }> {
     const cacheDir = this.options.cacheDir ?? getHFHubCachePath();
     const storageFolder = path.join(
       cacheDir,
-      getRepoFolderName({ type: "model", name: this.repoId }),
+      getRepoFolderName({ type: "model", name: this.modelId }),
     );
-
-    let sha: string | undefined;
-    let allFiles: string[];
 
     const cachedSha = await findCachedSnapshotSha(path.join(storageFolder, "snapshots"));
     if (cachedSha !== null) {
-      sha = cachedSha;
-      allFiles = await walkDir(path.join(storageFolder, "snapshots", sha));
-    } else {
-      const info = await modelInfo({ name: this.repoId, additionalFields: ["sha"], ...auth });
-      sha = info.sha;
-      if (!sha) throw new Error(`could not resolve commit sha for ${this.repoId}`);
-
-      allFiles = [];
-      for await (const entry of listFiles({ repo, revision: sha, recursive: true, ...auth })) {
-        if (entry.type === "file") allFiles.push(entry.path);
-      }
+      const files = await walkDir(path.join(storageFolder, "snapshots", cachedSha));
+      return { sha: cachedSha, files };
     }
 
+    const info = await modelInfo({ name: this.modelId, additionalFields: ["sha"], ...auth });
+    const sha = info.sha;
+    if (!sha) throw new Error(`could not resolve commit sha for ${this.modelId}`);
+
+    const files: string[] = [];
+    for await (const entry of listFiles({ repo, revision: sha, recursive: true, ...auth })) {
+      if (entry.type === "file") files.push(entry.path);
+    }
+    return { sha, files };
+  }
+
+  private async downloadArtifacts(
+    repo: { type: "model"; name: string },
+    sha: string,
+    allFiles: string[],
+    auth: { accessToken?: string },
+  ): Promise<Map<string, string>> {
     const hasQuantized = allFiles.includes("onnx/model_quantized.onnx");
     const patterns = hasQuantized ? PREFERRED_PATTERNS : FALLBACK_PATTERNS;
     const wanted = allFiles.filter((f) => matchesAny(f, patterns));
@@ -183,18 +214,21 @@ export class OnnxModelLoader {
       });
       downloaded.set(file, localPath);
     }
+    return downloaded;
+  }
 
+  private async buildArtifact(downloaded: Map<string, string>): Promise<ModelArtifact> {
     const onnxRel = ONNX_CANDIDATES.find((c) => downloaded.has(c));
     if (onnxRel === undefined) {
       throw new Error(
-        `No ONNX weights found for ${this.repoId}. Looked for: ${ONNX_CANDIDATES.join(", ")}`,
+        `No ONNX weights found for ${this.modelId}. Looked for: ${ONNX_CANDIDATES.join(", ")}`,
       );
     }
     const onnxPath = downloaded.get(onnxRel) as string;
 
     const tokenizerPath = downloaded.get("tokenizer.json");
     if (tokenizerPath === undefined) {
-      throw new Error(`tokenizer.json not found for ${this.repoId}`);
+      throw new Error(`tokenizer.json not found for ${this.modelId}`);
     }
 
     const modelDir = onnxPath.slice(0, onnxPath.length - onnxRel.length - 1);
@@ -202,7 +236,7 @@ export class OnnxModelLoader {
     const tokenizerJson = JSON.parse(await readFile(tokenizerPath, "utf-8"));
     const configPath = downloaded.get("tokenizer_config.json");
     const tokenizerConfig = configPath ? JSON.parse(await readFile(configPath, "utf-8")) : {};
-    const tokenizer = new BastionTokenizer(tokenizerJson, tokenizerConfig);
+    const tokenizer = new SlabWindowTokenizer(tokenizerJson, tokenizerConfig);
 
     const ort = await import("onnxruntime-node");
     const session = await ort.InferenceSession.create(onnxPath, {
@@ -218,25 +252,33 @@ export class OnnxModelLoader {
       labels,
       modelDir,
       inputNames: [...session.inputNames],
-      createTensor: ort.Tensor,
+      TensorClass: ort.Tensor,
     };
   }
 }
 
 /**
- * Return the 40-char commit SHA of the most recently modified snapshot inside
- * `snapshotsDir`, or `null` if none exists yet.
+ * Return the 40-char commit SHA of the most recently modified loadable snapshot
+ * inside `snapshotsDir`, or `null` if none exists yet.
  */
 async function findCachedSnapshotSha(snapshotsDir: string): Promise<string | null> {
   try {
     const entries = await readdir(snapshotsDir);
     const shaDirs = entries.filter((e) => REGEX_COMMIT_HASH.test(e));
     if (shaDirs.length === 0) return null;
-    if (shaDirs.length === 1) return shaDirs[0] ?? null;
+
+    const loadable: string[] = [];
+    for (const sha of shaDirs) {
+      if (await snapshotIsLoadable(path.join(snapshotsDir, sha))) {
+        loadable.push(sha);
+      }
+    }
+    if (loadable.length === 0) return null;
+    if (loadable.length === 1) return loadable[0] ?? null;
 
     let bestSha: string | null = null;
     let bestMtime = -1;
-    for (const sha of shaDirs) {
+    for (const sha of loadable) {
       const entryStat = await stat(path.join(snapshotsDir, sha));
       if (entryStat.mtimeMs > bestMtime) {
         bestMtime = entryStat.mtimeMs;
@@ -266,7 +308,20 @@ async function walkDir(dir: string, rel = ""): Promise<string[]> {
   return results;
 }
 
-/** Download one file, tolerating a concurrent process warming the same cache. */
+/** HTTP status codes that indicate a permanent failure not worth retrying. */
+const FATAL_STATUS_CODES = new Set([403, 404]);
+
+function isFatalHttpError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const match = err.message.match(/\b(4\d{2})\b/);
+  if (match) {
+    const code = Number(match[1]);
+    return FATAL_STATUS_CODES.has(code);
+  }
+  return false;
+}
+
+/** Download one file, tolerating transient race/ETag conflicts. Fatal on 403/404. */
 async function downloadWithRetry(
   params: Parameters<typeof downloadFileToCacheDir>[0],
 ): Promise<string> {
@@ -278,6 +333,7 @@ async function downloadWithRetry(
       return await downloadFileToCacheDir(params);
     } catch (err) {
       lastError = err;
+      if (isFatalHttpError(err)) break;
       if (attempt === MAX_ATTEMPTS) break;
       const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 8000);
       await new Promise((resolve) => setTimeout(resolve, backoffMs));

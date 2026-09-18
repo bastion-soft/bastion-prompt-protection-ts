@@ -15,12 +15,12 @@ export const Preset = {
 export type Preset = (typeof Preset)[keyof typeof Preset];
 
 /**
- * Model registry. Keys map to HuggingFace repos; the SDK downloads weights on
+ * HuggingFace repo IDs for each built-in preset. The SDK downloads weights on
  * first use and caches them. Presets are just named shortcuts — you don't have
  * to use one: pass any repo id via `{ model: ... }` to point the detector at
  * your own (or a self-hosted) model.
  */
-export const MODEL_REGISTRY: Record<Preset, string> = {
+export const PRESET_HF_REPOS: Record<Preset, string> = {
   [Preset.TINY]: "bastionsoft/binary-bastion-prompt-protection-deberta-v3-xsmall-v1",
   [Preset.MULTILINGUAL]: "bastionsoft/binary-bastion-prompt-protection-mdeberta-v3-base-v1",
 };
@@ -31,7 +31,7 @@ export const DEFAULT_THRESHOLDS: Readonly<Thresholds> = Object.freeze({
 });
 
 /** User-supplied guard options. Every field is optional. */
-export interface GuardConfigInit {
+export interface GuardOptions {
   preset?: Preset;
   thresholds?: Partial<Thresholds>;
   enableHeuristics?: boolean;
@@ -61,7 +61,7 @@ export interface GuardConfigInit {
    * license JSON emailed on purchase; defaults to $BASTION_LICENSE or
    * ~/.bastion/license.json. `requireLicense: true` makes the `Guard`
    * constructor refuse to start without a valid one. Default is non-blocking — status is
-   * exposed via `Guard.licenseStatus()` for audit/logging.
+   * exposed via `Guard.licenseStatus` for audit/logging.
    */
   licensePath?: string;
   requireLicense?: boolean;
@@ -112,7 +112,7 @@ export interface GuardConfig {
 /** Public snapshot exposed on `Guard.config` — no secrets. */
 export type PublicGuardConfig = Omit<GuardConfig, "hfToken">;
 
-export function resolveConfig(init: GuardConfigInit = {}): GuardConfig {
+export function resolveConfig(init: GuardOptions = {}): GuardConfig {
   return {
     preset: init.preset ?? Preset.TINY,
     thresholds: Object.freeze({ ...DEFAULT_THRESHOLDS, ...init.thresholds }),
@@ -140,7 +140,8 @@ export function toPublicConfig(config: GuardConfig): PublicGuardConfig {
 /** Resolve the HuggingFace repo id for the classifier. An explicit `model` overrides the preset. */
 export function resolveClassifierRepo(config: Pick<GuardConfig, "preset" | "model">): string {
   if (config.model) return config.model;
-  const repo = MODEL_REGISTRY[config.preset];
+  const repo = PRESET_HF_REPOS[config.preset];
+  // TODO(X10): dead code when preset is typed Preset — repo is always defined
   if (!repo) throw new Error(`Unknown preset: ${config.preset}`);
   return repo;
 }

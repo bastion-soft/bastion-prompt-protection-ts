@@ -29,9 +29,6 @@ export interface GuardResult {
   stageReached: Stage;
   latencyMs: number;
   readonly isAttack: boolean;
-}
-
-export interface WindowedGuardResult extends GuardResult {
   /**
    * Windows actually scanned. Fewer than `windowsTotal` when an early hit ended
    * the scan, or when `maxWindows` capped it — compare the two to tell whether
@@ -54,8 +51,8 @@ export interface ProtectOptions extends Partial<WindowOptions> {
    * bound worst-case work on untrusted input, and check
    * `windowsScanned < windowsTotal` to detect partial coverage.
    *
-   * `maxWindows: 1` scans only the first model window — the same single-window
-   * behaviour as the Python package's `protect()`.
+   * `maxWindows: 1` scans only the first sliding window. The default is
+   * unlimited window coverage, same as the Python SDK.
    */
   maxWindows?: number;
   /**

@@ -1,16 +1,12 @@
 import { TemperatureScaler } from "../calibration.js";
 import { type ModelArtifact, type OnnxModelLoaderOptions, OnnxModelLoader } from "../models/loader.js";
-import { type Encoding, type TokenWindow } from "../models/tokenizer.js";
+import { type TokenEncoding, type TokenWindow } from "../models/tokenizer.js";
 import type { WindowOptions } from "../types.js";
-
-export interface ClassifierScore {
-  risk: number;
-}
 
 export class ClassifierStage {
   private readonly loader: OnnxModelLoader;
   private scaler = new TemperatureScaler(1.0);
-  private calibrationLoaded = false;
+  private calibrationPromise: Promise<void> | null = null;
 
   constructor(options: OnnxModelLoaderOptions) {
     this.loader = new OnnxModelLoader(options);
@@ -22,22 +18,22 @@ export class ClassifierStage {
    * loaded yet; does not trigger loading.
    */
   get modelVersion(): string | null {
-    const sha = this.loader.snapshotSha;
-    return sha === null ? null : sha.slice(0, 7);
+    const revision = this.loader.snapshotRevision;
+    return revision === null ? null : revision.slice(0, 7);
   }
 
-  async score(text: string): Promise<ClassifierScore> {
+  async score(text: string): Promise<number> {
     const artifact = await this.loader.load();
     await this.ensureCalibration(artifact);
     return this.scoreEncoded(artifact.tokenizer.encode(text));
   }
 
-  async scoreEncoded(encoding: Encoding): Promise<ClassifierScore> {
+  async scoreEncoded(encoding: TokenEncoding): Promise<number> {
     const artifact = await this.loader.load();
     await this.ensureCalibration(artifact);
 
     const { ids, attentionMask } = encoding;
-    const Tensor = artifact.createTensor;
+    const Tensor = artifact.TensorClass;
     const dims = [1, ids.length];
     const feeds: Record<string, InstanceType<typeof Tensor>> = {
       input_ids: new Tensor("int64", BigInt64Array.from(ids, BigInt), dims),
@@ -51,7 +47,7 @@ export class ClassifierStage {
     const first = outputs[artifact.session.outputNames[0] as string];
     const raw = Array.from(first?.data as Float32Array, Number);
 
-    return { risk: this.scaler.attackProbability(raw) };
+    return this.scaler.attackProbability(raw);
   }
 
   async *windows(text: string, options: WindowOptions = {}): AsyncGenerator<TokenWindow> {
@@ -59,9 +55,16 @@ export class ClassifierStage {
     yield* artifact.tokenizer.windows(text, options);
   }
 
-  private async ensureCalibration(artifact: ModelArtifact): Promise<void> {
-    if (this.calibrationLoaded) return;
-    this.scaler = await TemperatureScaler.fromModelDir(artifact.modelDir, artifact.labels);
-    this.calibrationLoaded = true;
+  private ensureCalibration(artifact: ModelArtifact): Promise<void> {
+    this.calibrationPromise ??= TemperatureScaler.fromModelDir(
+      artifact.modelDir,
+      artifact.labels,
+    ).then((scaler) => {
+      this.scaler = scaler;
+    }).catch((err) => {
+      this.calibrationPromise = null;
+      throw err;
+    });
+    return this.calibrationPromise;
   }
 }

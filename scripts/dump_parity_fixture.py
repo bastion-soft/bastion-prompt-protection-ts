@@ -10,7 +10,7 @@ suite can localise any divergence to a specific stage.
 import json
 import pathlib
 
-from bastion_prompt_protection import Guard, GuardConfig, __version__
+from bastion_prompt_protection import Guard, GuardOptions, __version__
 from bastion_prompt_protection.stages.heuristics import HeuristicsStage
 
 HERE = pathlib.Path(__file__).parent
@@ -23,7 +23,7 @@ heur = HeuristicsStage()
 # Force the model to load so model_version is populated and recorded.
 guard.protect("warmup")
 
-cfg = GuardConfig()
+cfg = GuardOptions()
 meta = {
     "sdk_version": __version__,
     "model_id": cfg.model_id("binary"),

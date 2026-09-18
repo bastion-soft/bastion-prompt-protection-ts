@@ -1,4 +1,4 @@
-export { Guard, type GuardResult, type ProtectOptions, type WindowedGuardResult } from "./guard.js";
+export { Guard } from "./guard.js";
 
 export {
   DEFAULT_MAX_INPUT_CHARS,
@@ -11,8 +11,8 @@ export {
 export {
   DEFAULT_THRESHOLDS,
   Preset,
-  type GuardConfigInit,
-  type PublicGuardConfig as GuardConfig,
+  type GuardOptions,
+  type PublicGuardConfig,
 } from "./config.js";
 
 export {
@@ -20,7 +20,9 @@ export {
   LABEL_SAFE,
   STAGE_CLASSIFIER,
   STAGE_HEURISTICS,
+  type GuardResult,
   type Label,
+  type ProtectOptions,
   type Stage,
   type Thresholds,
   type WindowOptions,

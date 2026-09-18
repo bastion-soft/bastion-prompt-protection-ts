@@ -18,7 +18,7 @@ python canonical_cases.py       # -> canonical_cases.json -> test/fixtures/canon
 
 | Fixture                             | Pins                                                                                                                                                                                                                                                |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/fixtures/parity.json`         | End-to-end verdicts (`risk`, `label`, `stage_reached`) plus the isolated `heuristic_score`, so a divergence can be localised to a stage. This is the only oracle for the ONNX path — the Python package has no unit test covering the binary stage. |
+| `test/fixtures/parity.json`         | End-to-end verdicts (`risk`, `label`, `stage_reached`) plus the isolated `heuristic_score`, so a divergence can be localised to a stage. This is the only oracle for the ONNX path — the Python package has no unit test covering the classifier stage. |
 | `test/fixtures/canonical-json.json` | Byte-exact output of Python's `json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=False)`. License signatures are computed over these bytes, so any drift here silently invalidates every signature.                                    |
 
 ## Regenerating after a model change

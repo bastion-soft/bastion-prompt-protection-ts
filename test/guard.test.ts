@@ -1,7 +1,7 @@
 /**
  * Ported from tests/test_guard.py.
  *
- * Like the Python suite, most guard tests disable the binary stage so the unit
+ * Like the Python suite, most guard tests disable the classifier stage so the unit
  * tests never download model weights.
  */
 import { readFileSync } from "node:fs";

@@ -1,13 +1,13 @@
 import {
   type GuardConfig,
-  type GuardConfigInit,
+  type GuardOptions,
   type Preset,
   type PublicGuardConfig,
   resolveClassifierRepo,
   resolveConfig,
   toPublicConfig,
 } from "./config.js";
-import { LicenseVerifier } from "./license.js";
+import { LicenseVerifier, type LicenseStatus } from "./license.js";
 import { ClassifierStage } from "./stages/classifier.js";
 import { HeuristicsStage } from "./stages/heuristics.js";
 import {
@@ -19,18 +19,22 @@ import {
   type Label,
   type ProtectOptions,
   type Stage,
-  type WindowedGuardResult,
   type WindowOptions,
 } from "./types.js";
 import { collapseWhitespace, roundTo } from "./utils.js";
 import { VERSION } from "./version.js";
 
+type StageResult = Pick<
+  GuardResult,
+  "risk" | "label" | "stageReached" | "latencyMs" | "isAttack"
+>;
+
 function withWindowCoverage(
-  base: GuardResult,
+  base: StageResult,
   scanned: number,
   total: number,
   exact: boolean,
-): WindowedGuardResult {
+): GuardResult {
   return {
     ...base,
     windowsScanned: scanned,
@@ -54,7 +58,7 @@ export class Guard {
   private readonly heuristics: HeuristicsStage | null;
   private readonly classifier: ClassifierStage | null;
 
-  constructor(init: GuardConfigInit | Preset = {}) {
+  constructor(init: GuardOptions | Preset = {}) {
     this.resolvedConfig = resolveConfig(typeof init === "string" ? { preset: init } : init);
     this.config = toPublicConfig(this.resolvedConfig);
     this.license = new LicenseVerifier(this.resolvedConfig.licensePath);
@@ -62,6 +66,7 @@ export class Guard {
     if (this.resolvedConfig.requireLicense) {
       const status = this.license.verify();
       if (!status.valid) {
+        // TODO(X4): throw typed LicenseError, not generic Error
         throw new Error(
           `Bastion: requireLicense is set but no valid commercial license was found ` +
             `(${status.reason}). Obtain one at https://bastionsoft.com, or unset requireLicense.`,
@@ -72,7 +77,7 @@ export class Guard {
     this.heuristics = this.resolvedConfig.enableHeuristics ? new HeuristicsStage() : null;
     this.classifier = this.resolvedConfig.enableClassifier
       ? new ClassifierStage({
-          repoId: resolveClassifierRepo(this.resolvedConfig),
+          modelId: resolveClassifierRepo(this.resolvedConfig),
           onModelUnavailable: this.resolvedConfig.onModelUnavailable,
           cacheDir: this.resolvedConfig.cacheDir,
           hfToken: this.resolvedConfig.hfToken,
@@ -100,7 +105,7 @@ export class Guard {
    * `config.licensePath` or the default locations. Non-blocking — read it for
    * audit/logging. The free TINY model needs no license.
    */
-  licenseStatus() {
+  get licenseStatus(): LicenseStatus {
     return this.license.verify();
   }
 
@@ -110,7 +115,7 @@ export class Guard {
    * By default the input is split into overlapping token windows and every
    * window is scanned, stopping early once a window reaches
    * `thresholds.attackAbove`. Pass `{ maxWindows: 1 }` to scan only the first
-   * model window — the Python-parity single-window mode.
+   * sliding window.
    *
    * Throws `ModelUnavailableError` when the classifier model cannot be loaded
    * (see `onModelUnavailable` for retry vs. permanent-throw behaviour).
@@ -118,7 +123,8 @@ export class Guard {
    * runs before the model is consulted and returns an attack result without
    * needing the model.
    */
-  async protect(prompt: string, options: ProtectOptions = {}): Promise<WindowedGuardResult> {
+  async protect(prompt: string, options: ProtectOptions = {}): Promise<GuardResult> {
+    // TODO(X9): validate ProtectOptions values at the entry point
     const start = performance.now();
 
     const shouldNormalize = options.normalizeWhitespace ?? this.config.normalizeWhitespace;
@@ -141,11 +147,6 @@ export class Guard {
       return withWindowCoverage(this.finalize(0, STAGE_HEURISTICS, start), 0, 0, true);
     }
 
-    if (options.maxWindows === 1) {
-      const { risk } = await this.classifier.score(textForModel);
-      return withWindowCoverage(this.finalize(risk, STAGE_CLASSIFIER, start), 1, 1, true);
-    }
-
     const windowOpts: WindowOptions = {
       overlapTokens: options.overlapTokens ?? this.config.overlapTokens,
       windowTokens: options.windowTokens,
@@ -153,7 +154,7 @@ export class Guard {
     };
     const limit = options.maxWindows ?? Number.POSITIVE_INFINITY;
 
-    let worst: GuardResult | null = null;
+    let highestRiskResult: StageResult | null = null;
     let scanned = 0;
     let windowsTotal = 1;
     let windowsTotalExact = false;
@@ -164,20 +165,20 @@ export class Guard {
       windowsTotal = window.windowsTotal;
       windowsTotalExact = window.windowsTotalExact;
 
-      const { risk } = await this.classifier.scoreEncoded(window.encoding);
+      const risk = await this.classifier.scoreEncoded(window.encoding);
       const result = this.finalize(risk, STAGE_CLASSIFIER, start);
-      if (worst === null || result.risk > worst.risk) worst = result;
-      if (worst.risk >= this.config.thresholds.attackAbove) break;
+      if (highestRiskResult === null || result.risk > highestRiskResult.risk) highestRiskResult = result;
+      if (highestRiskResult.risk >= this.config.thresholds.attackAbove) break;
     }
 
-    if (scanned === 0) {
-      const { risk } = await this.classifier.score(textForModel);
+    if (highestRiskResult === null) {
+      const risk = await this.classifier.score(textForModel);
       return withWindowCoverage(this.finalize(risk, STAGE_CLASSIFIER, start), 0, 0, true);
     }
 
     return withWindowCoverage(
       {
-        ...worst!,
+        ...highestRiskResult,
         latencyMs: roundTo(performance.now() - start, 3),
       },
       scanned,
@@ -186,7 +187,7 @@ export class Guard {
     );
   }
 
-  private finalize(risk: number, stageReached: Stage, start: number): GuardResult {
+  private finalize(risk: number, stageReached: Stage, start: number): StageResult {
     const label: Label = risk >= this.config.thresholds.attackAbove ? LABEL_ATTACK : LABEL_SAFE;
     const latencyMs = performance.now() - start;
     return {
@@ -198,5 +199,3 @@ export class Guard {
     };
   }
 }
-
-export type { GuardResult, ProtectOptions, WindowedGuardResult } from "./types.js";

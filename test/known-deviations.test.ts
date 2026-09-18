@@ -43,8 +43,9 @@ beforeAll(async () => {
   if (guard.modelVersion === null) {
     throw new Error(
       "Model weights did not load; these cases all exercise the ONNX stage. " +
-        'Look for a "bastion-prompt-protection: model … unavailable" warning ' +
-        "earlier in the log. This is an environment failure, not a parity failure.",
+        "Warmup likely threw ModelUnavailableError — check the log for " +
+        '"bastion-prompt-protection: model … unavailable". ' +
+        "This is an environment failure, not a parity failure.",
     );
   }
 }, 600_000);

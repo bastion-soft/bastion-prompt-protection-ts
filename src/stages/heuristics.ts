@@ -56,9 +56,8 @@ const BASE64_PAYLOAD_RE =
 const SPACED_LETTERS_RE = /(?:\b[A-Za-z]\s){8,}[A-Za-z]\b/;
 
 function structuralScore(text: string): number {
-  ZERO_WIDTH_RE.lastIndex = 0;
-  const zeroWidth = text.match(ZERO_WIDTH_RE);
-  if (zeroWidth !== null && zeroWidth.length >= 3) return 0.96;
+  const zeroWidth = text.match(ZERO_WIDTH_RE)?.length ?? 0;
+  if (zeroWidth >= 3) return 0.96;
   if (SPACED_LETTERS_RE.test(text)) return 0.8;
   if (BASE64_PAYLOAD_RE.test(text)) return 0.55;
   return 0.0;
@@ -72,6 +71,7 @@ export class HeuristicsStage {
     if (!text) return 0.0;
     let best = 0.0;
     for (const rule of this.rules) {
+      // TODO(R6): stateful global regexes — prefer matchAll or non-global patterns
       rule.pattern.lastIndex = 0;
       if (rule.pattern.test(text) && rule.confidence > best) best = rule.confidence;
     }

@@ -92,7 +92,7 @@ describe("protect (windowed)", () => {
     }
   }, 300_000);
 
-  it("keeps maxWindows:1 bit-identical to Python's single-window protect()", async () => {
+  it("keeps maxWindows:1 deterministic on repeated calls", async () => {
     const document = FILLER.repeat(40) + INJECTION;
     const a = await guard.protect(document, { maxWindows: 1 });
     const b = await guard.protect(document, { maxWindows: 1 });
