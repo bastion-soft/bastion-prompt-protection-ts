@@ -34,6 +34,18 @@ export interface LicenseStatus {
   expired: boolean;
 }
 
+function readString(data: Record<string, unknown>, key: string): string | null {
+  const value = data[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readCompanyName(data: Record<string, unknown>): string | null {
+  const customer = data.customer;
+  if (customer === null || typeof customer !== "object") return null;
+  const company = (customer as Record<string, unknown>).company_name;
+  return typeof company === "string" && company.length > 0 ? company : null;
+}
+
 /**
  * Offline Ed25519 license verification.
  *
@@ -72,8 +84,8 @@ export class LicenseVerifier {
       return this.status(false, "signature verification failed", data);
     }
 
-    const validUntil = data.valid_until;
-    if (typeof validUntil === "string" && validUntil.length > 0) {
+    const validUntil = readString(data, "valid_until");
+    if (validUntil !== null) {
       const expiry = parseIsoUtc(validUntil);
       // An unparseable date must not fail a signature-valid license closed.
       if (!Number.isNaN(expiry) && Date.now() > expiry) {
@@ -115,14 +127,13 @@ export class LicenseVerifier {
     data: Record<string, unknown> | null,
     expired = false,
   ): LicenseStatus {
-    const customer = (data?.customer ?? null) as { company_name?: string } | null;
     return {
       valid,
       reason,
-      licenseId: (data?.license_id as string) ?? null,
-      tier: (data?.tier as string) ?? null,
-      company: customer?.company_name ?? null,
-      validUntil: (data?.valid_until as string) ?? null,
+      licenseId: data === null ? null : readString(data, "license_id"),
+      tier: data === null ? null : readString(data, "tier"),
+      company: data === null ? null : readCompanyName(data),
+      validUntil: data === null ? null : readString(data, "valid_until"),
       expired,
     };
   }

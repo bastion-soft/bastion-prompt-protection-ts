@@ -1,20 +1,5 @@
-import { DEFAULT_TOKEN_OVERLAP } from "./constants.js";
-
-export {
-  CONTENT_TOKEN_WINDOW,
-  DEFAULT_SLAB_CHARS,
-  DEFAULT_TOKEN_OVERLAP,
-  estimateWindowCount,
-  LABEL_ATTACK,
-  LABEL_SAFE,
-  MODEL_TOKEN_WINDOW,
-  NEUTRAL_RISK,
-  STAGE_CLASSIFIER,
-  STAGE_HEURISTICS,
-  type Label,
-  type Stage,
-  type WindowOptions,
-} from "./constants.js";
+import { DEFAULT_MAX_INPUT_CHARS, DEFAULT_TOKEN_OVERLAP } from "./constants.js";
+import type { ModelUnavailableMode, Thresholds } from "./types.js";
 
 export const Preset = {
   /** Free, AGPL. DeBERTa-v3-xsmall fine-tune, 70M params, ONNX-INT8 quantized. */
@@ -35,27 +20,15 @@ export type Preset = (typeof Preset)[keyof typeof Preset];
  * to use one: pass any repo id via `{ model: ... }` to point the detector at
  * your own (or a self-hosted) model.
  */
-export const MODEL_REGISTRY: Record<Preset, { classifier: string }> = {
-  [Preset.TINY]: {
-    classifier: "bastionsoft/binary-bastion-prompt-protection-deberta-v3-xsmall-v1",
-  },
-  [Preset.MULTILINGUAL]: {
-    classifier: "bastionsoft/binary-bastion-prompt-protection-mdeberta-v3-base-v1",
-  },
+export const MODEL_REGISTRY: Record<Preset, string> = {
+  [Preset.TINY]: "bastionsoft/binary-bastion-prompt-protection-deberta-v3-xsmall-v1",
+  [Preset.MULTILINGUAL]: "bastionsoft/binary-bastion-prompt-protection-mdeberta-v3-base-v1",
 };
-
-export interface Thresholds {
-  attackAbove: number;
-  heuristicShortCircuit: number;
-}
 
 export const DEFAULT_THRESHOLDS: Readonly<Thresholds> = Object.freeze({
   attackAbove: 0.5,
   heuristicShortCircuit: 0.95,
 });
-
-/** Total input length bound before token windowing (characters, not tokens). */
-export const DEFAULT_MAX_INPUT = 262_144;
 
 /** User-supplied guard options. Every field is optional. */
 export interface GuardConfigInit {
@@ -63,7 +36,7 @@ export interface GuardConfigInit {
   thresholds?: Partial<Thresholds>;
   enableHeuristics?: boolean;
   enableClassifier?: boolean;
-  /** Total input length bound before windowing (characters). Defaults to `DEFAULT_MAX_INPUT`. */
+  /** Total input length bound before windowing (characters). Defaults to `DEFAULT_MAX_INPUT_CHARS`. */
   maxInputChars?: number;
   /** Content-token overlap between consecutive windows. Defaults to `DEFAULT_TOKEN_OVERLAP`. */
   overlapTokens?: number;
@@ -100,9 +73,26 @@ export interface GuardConfigInit {
    * fidelity matters, e.g. when reproducing Python-package scores exactly.
    */
   normalizeWhitespace?: boolean;
+  /**
+   * Controls behaviour when the ONNX classifier model cannot be loaded.
+   *
+   * - `"try-download-then-throw"` (default): on a failed download, `protect()`
+   *   throws `ModelUnavailableError`. The loader retries the download on each
+   *   subsequent call after a 5-second cooldown; once a download succeeds the
+   *   guard self-heals and normal operation resumes.
+   *
+   * - `"throw"`: the first failed download is cached permanently. Every
+   *   subsequent `protect()` call throws `ModelUnavailableError` immediately
+   *   with no retry attempt.
+   *
+   * In both modes heuristic short-circuit (score ≥ 0.95) still fires before
+   * the model is consulted, so obvious structural injections are caught even
+   * while the model is unavailable. Heuristics-only fallback is never used.
+   */
+  onModelUnavailable?: ModelUnavailableMode;
 }
 
-/** Fully-resolved configuration, with every default applied. */
+/** Fully-resolved configuration, with every default applied. Includes secrets. */
 export interface GuardConfig {
   preset: Preset;
   thresholds: Readonly<Thresholds>;
@@ -116,7 +106,11 @@ export interface GuardConfig {
   licensePath?: string;
   requireLicense: boolean;
   normalizeWhitespace: boolean;
+  onModelUnavailable: ModelUnavailableMode;
 }
+
+/** Public snapshot exposed on `Guard.config` — no secrets. */
+export type PublicGuardConfig = Omit<GuardConfig, "hfToken">;
 
 export function resolveConfig(init: GuardConfigInit = {}): GuardConfig {
   return {
@@ -124,7 +118,7 @@ export function resolveConfig(init: GuardConfigInit = {}): GuardConfig {
     thresholds: Object.freeze({ ...DEFAULT_THRESHOLDS, ...init.thresholds }),
     enableHeuristics: init.enableHeuristics ?? true,
     enableClassifier: init.enableClassifier ?? true,
-    maxInputChars: init.maxInputChars ?? DEFAULT_MAX_INPUT,
+    maxInputChars: init.maxInputChars ?? DEFAULT_MAX_INPUT_CHARS,
     overlapTokens: init.overlapTokens ?? DEFAULT_TOKEN_OVERLAP,
     cacheDir: init.cacheDir,
     // Unlike Python's huggingface_hub, @huggingface/hub does not read these
@@ -134,13 +128,19 @@ export function resolveConfig(init: GuardConfigInit = {}): GuardConfig {
     licensePath: init.licensePath,
     requireLicense: init.requireLicense ?? false,
     normalizeWhitespace: init.normalizeWhitespace ?? true,
+    onModelUnavailable: init.onModelUnavailable ?? "try-download-then-throw",
   };
 }
 
-/** Resolve the HF repo id for a stage. An explicit `model` overrides the preset. */
-export function modelId(config: GuardConfig, stage: "classifier"): string {
-  if (stage === "classifier" && config.model) return config.model;
-  const entry = MODEL_REGISTRY[config.preset];
-  if (!entry) throw new Error(`Unknown preset: ${config.preset}`);
-  return entry[stage];
+export function toPublicConfig(config: GuardConfig): PublicGuardConfig {
+  const { hfToken: _omit, ...publicConfig } = config;
+  return Object.freeze(publicConfig);
+}
+
+/** Resolve the HuggingFace repo id for the classifier. An explicit `model` overrides the preset. */
+export function resolveClassifierRepo(config: Pick<GuardConfig, "preset" | "model">): string {
+  if (config.model) return config.model;
+  const repo = MODEL_REGISTRY[config.preset];
+  if (!repo) throw new Error(`Unknown preset: ${config.preset}`);
+  return repo;
 }

@@ -4,18 +4,22 @@
  * Like the Python suite, most guard tests disable the binary stage so the unit
  * tests never download model weights.
  */
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_TOKEN_OVERLAP,
   Guard,
   LABEL_ATTACK,
   LABEL_SAFE,
+  ModelUnavailableError,
   Preset,
   STAGE_HEURISTICS,
 } from "../src/index.js";
+import { OnnxModelLoader } from "../src/models/loader.js";
 import { VERSION } from "../src/version.js";
 
 const guard = () => new Guard({ enableClassifier: false });
+const packageVersion = JSON.parse(readFileSync("package.json", "utf-8")).version as string;
 
 describe("Guard", () => {
   it("returns safe for a benign prompt", async () => {
@@ -58,7 +62,6 @@ describe("Guard", () => {
   });
 
   it("runs heuristics on the full input regardless of maxInputChars", async () => {
-    // Heuristics see the whole prompt; maxInputChars only bounds windowing.
     const g = new Guard({ enableClassifier: false, maxInputChars: 10 });
     const result = await g.protect("a".repeat(10) + "<|im_start|>");
     expect(result.label).toBe(LABEL_ATTACK);
@@ -81,9 +84,10 @@ describe("Guard", () => {
     expect(result.latencyMs).toBeLessThan(1000);
   });
 
-  it("reports sdkVersion and a null modelVersion when the classifier stage is off", () => {
+  it("reports sdkVersion matching package.json and a null modelVersion when the classifier stage is off", () => {
     const g = guard();
     expect(g.sdkVersion).toBe(VERSION);
+    expect(g.sdkVersion).toBe(packageVersion);
     expect(g.modelVersion).toBeNull();
   });
 
@@ -103,9 +107,38 @@ describe("Guard", () => {
     expect(result.windowsTotalExact).toBe(true);
   });
 
+  it("reports zero windows for maxWindows:1 when the classifier is disabled", async () => {
+    const result = await guard().protect("hello world", { maxWindows: 1 });
+    expect(result.windowsScanned).toBe(0);
+    expect(result.windowsTotal).toBe(0);
+    expect(result.windowsTotalExact).toBe(true);
+  });
+
   it("accepts a preset shorthand and a config object", () => {
     expect(new Guard(Preset.TINY).config.preset).toBe("tiny");
     expect(new Guard({ preset: Preset.MULTILINGUAL }).config.preset).toBe("multilingual");
+  });
+
+  it("exposes a frozen public config without hfToken", () => {
+    const g = new Guard({ hfToken: "secret-token" });
+    expect(Object.isFrozen(g.config)).toBe(true);
+    expect("hfToken" in g.config).toBe(false);
+  });
+
+  it('defaults onModelUnavailable to "try-download-then-throw"', () => {
+    expect(new Guard().config.onModelUnavailable).toBe("try-download-then-throw");
+  });
+
+  it("throws ModelUnavailableError rather than degrading to heuristics when model is unavailable", async () => {
+    vi.spyOn(OnnxModelLoader.prototype, "load").mockRejectedValue(
+      new ModelUnavailableError("test/model", new Error("no network")),
+    );
+    try {
+      const g = new Guard({ onModelUnavailable: "throw" });
+      await expect(g.protect("hello world")).rejects.toBeInstanceOf(ModelUnavailableError);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   describe("normalizeWhitespace", () => {

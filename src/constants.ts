@@ -17,14 +17,8 @@ export const DEFAULT_TOKEN_OVERLAP = 64;
  */
 export const DEFAULT_SLAB_CHARS = 512;
 
-export type WindowOptions = {
-  /** Model window including special tokens. Defaults to `MODEL_TOKEN_WINDOW`. */
-  windowTokens?: number;
-  /** Content tokens repeated from the previous window. Defaults to `DEFAULT_TOKEN_OVERLAP`. */
-  overlapTokens?: number;
-  /** Characters per tokenization slab. Defaults to `DEFAULT_SLAB_CHARS`. */
-  slabChars?: number;
-};
+/** Total input length bound before token windowing (characters, not tokens). */
+export const DEFAULT_MAX_INPUT_CHARS = 262_144;
 
 /** Estimate how many windows cover a token stream of the given length. */
 export function estimateWindowCount(
@@ -37,18 +31,3 @@ export function estimateWindowCount(
   const step = Math.max(1, contentWindow - overlapTokens);
   return Math.ceil((tokenCount - contentWindow) / step) + 1;
 }
-
-export const LABEL_SAFE = "safe";
-export const LABEL_ATTACK = "attack";
-
-export const STAGE_HEURISTICS = "heuristics";
-export const STAGE_CLASSIFIER = "classifier";
-
-export type Label = typeof LABEL_SAFE | typeof LABEL_ATTACK;
-export type Stage = typeof STAGE_HEURISTICS | typeof STAGE_CLASSIFIER;
-
-/**
- * Returned when model weights are not yet available. Matches `attackAbove`
- * (0.5) so an unavailable classifier does not falsely label content as attack.
- */
-export const NEUTRAL_RISK = 0.5;

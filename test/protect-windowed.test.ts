@@ -27,12 +27,11 @@ beforeAll(async () => {
 
 describe("protect (windowed)", () => {
   it("finds an injection that a single-window scan cannot see past its token window", async () => {
-    // Buried well beyond ~2000 characters, so the classifier never reads it.
     const document = FILLER.repeat(40) + INJECTION + " " + FILLER.repeat(10);
     expect(document.length).toBeGreaterThan(6000);
 
     const whole = await guard.protect(document, { maxWindows: 1 });
-    expect(whole.label).toBe("safe"); // the blind spot windowing exists for
+    expect(whole.label).toBe("safe");
 
     const windowed = await guard.protect(document);
     expect(windowed.label).toBe("attack");
@@ -40,8 +39,6 @@ describe("protect (windowed)", () => {
   }, 300_000);
 
   it("scans past maxInputChars when the injection sits beyond the bound", async () => {
-    // `maxInputChars` bounds the whole input before windowing. Place the
-    // injection just inside the bound so windowed scanning still reaches it.
     const filler = FILLER.repeat(300);
     const within = filler.slice(0, guard.config.maxInputChars - INJECTION.length - 20);
     const document = within + " " + INJECTION;
@@ -56,7 +53,6 @@ describe("protect (windowed)", () => {
     const capped = await guard.protect(document, { maxWindows: 3 });
     expect(capped.windowsScanned).toBe(3);
     expect(capped.windowsTotal).toBeGreaterThan(3);
-    // The caller can detect that the input was not fully covered.
     expect(capped.windowsScanned).toBeLessThan(capped.windowsTotal);
   }, 600_000);
 
@@ -64,7 +60,6 @@ describe("protect (windowed)", () => {
     const document = FILLER.repeat(40);
     const windowed = await guard.protect(document);
     expect(windowed.label).toBe("safe");
-    // Nothing hit, so every window was scanned.
     expect(windowed.windowsScanned).toBe(windowed.windowsTotal);
   }, 300_000);
 

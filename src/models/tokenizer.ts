@@ -1,5 +1,4 @@
 import { Tokenizer } from "@huggingface/tokenizers";
-import { slabify } from "../chunking.js";
 import {
   CONTENT_TOKEN_WINDOW,
   DEFAULT_SLAB_CHARS,
@@ -7,8 +6,8 @@ import {
   MODEL_TOKEN_WINDOW,
   SPECIAL_TOKEN_BUDGET,
   estimateWindowCount,
-  type WindowOptions,
 } from "../constants.js";
+import type { WindowOptions } from "../types.js";
 
 export interface Encoding {
   ids: number[];
@@ -17,10 +16,46 @@ export interface Encoding {
 
 export interface TokenWindow {
   encoding: Encoding;
-  /** Estimated windows covering the whole input; exact once `exact` is true. */
-  estimatedTotal: number;
+  /** Estimated windows covering the whole input; exact once `windowsTotalExact` is true. */
+  windowsTotal: number;
   /** True when the estimate is exact (stream fully tokenized). */
-  exact: boolean;
+  windowsTotalExact: boolean;
+}
+
+interface HfEncoding {
+  input_ids?: ArrayLike<number>;
+  ids?: ArrayLike<number>;
+  attention_mask?: ArrayLike<number>;
+}
+
+/**
+ * Splits input into contiguous character slabs for bounded tokenization.
+ *
+ * Slabs are non-overlapping and lossless: `[...slabify(text)].join("") === text`.
+ * Each slab is at most `slabChars` characters. When possible the cut lands on
+ * whitespace so the concatenated token stream matches a single `encode()` call.
+ * Whitespace-free runs (base64, minified JSON, HTML) are hard-cut at the limit.
+ */
+function* slabify(text: string, slabChars: number = DEFAULT_SLAB_CHARS): Generator<string> {
+  const limit = Math.max(1, slabChars);
+  if (text.length === 0) return;
+
+  let pos = 0;
+  while (pos < text.length) {
+    let end = Math.min(pos + limit, text.length);
+    if (end < text.length) {
+      let wsCut = -1;
+      for (let i = end; i > pos; i--) {
+        if (/\s/u.test(text[i - 1] ?? "")) {
+          wsCut = i;
+          break;
+        }
+      }
+      if (wsCut > pos) end = wsCut;
+    }
+    yield text.slice(pos, end);
+    pos = end;
+  }
 }
 
 /**
@@ -60,13 +95,9 @@ export class BastionTokenizer {
   }
 
   encode(text: string): Encoding {
-    const enc = this.tokenizer.encode(text) as {
-      input_ids?: ArrayLike<number>;
-      ids?: ArrayLike<number>;
-      attention_mask?: ArrayLike<number>;
-    };
-    let ids = Array.from(enc.input_ids ?? enc.ids ?? []);
-    let attentionMask = Array.from(enc.attention_mask ?? []);
+    const enc = this.parseEncoding(this.tokenizer.encode(text));
+    let ids = enc.ids;
+    let attentionMask = enc.attentionMask;
 
     const max = this.maxLength;
     if (max !== null && ids.length > max) {
@@ -81,11 +112,10 @@ export class BastionTokenizer {
 
   /** Tokenize content without `[CLS]` / `[SEP]`. */
   encodeContent(text: string): number[] {
-    const enc = this.tokenizer.encode(text, { add_special_tokens: false }) as {
-      input_ids?: ArrayLike<number>;
-      ids?: ArrayLike<number>;
-    };
-    return Array.from(enc.input_ids ?? enc.ids ?? []);
+    const enc = this.parseEncoding(
+      this.tokenizer.encode(text, { add_special_tokens: false }),
+    );
+    return enc.ids;
   }
 
   /**
@@ -125,8 +155,8 @@ export class BastionTokenizer {
 
     const emitAt = (start: number, exact: boolean): TokenWindow => ({
       encoding: wrap(stream.slice(start, start + contentWindow)),
-      estimatedTotal: projectTotal(exact),
-      exact,
+      windowsTotal: projectTotal(exact),
+      windowsTotalExact: exact,
     });
 
     for (const slab of slabify(text, slabChars)) {
@@ -154,12 +184,19 @@ export class BastionTokenizer {
       pos += step;
     }
   }
+
+  /** Exposed for tests that verify slab/tokenizer alignment. */
+  slabs(text: string, slabChars: number = DEFAULT_SLAB_CHARS): string[] {
+    return [...slabify(text, slabChars)];
+  }
+
+  private parseEncoding(raw: unknown): { ids: number[]; attentionMask: number[] } {
+    const enc = raw as HfEncoding;
+    const ids = Array.from(enc.input_ids ?? enc.ids ?? []);
+    const attentionMask = Array.from(enc.attention_mask ?? []);
+    return { ids, attentionMask };
+  }
 }
 
-/** Resolve the content-token budget from window options. Exported for tests. */
-export function resolveContentWindow(options: WindowOptions = {}): number {
-  const windowTokens = options.windowTokens ?? MODEL_TOKEN_WINDOW;
-  return windowTokens - SPECIAL_TOKEN_BUDGET;
-}
-
-export { CONTENT_TOKEN_WINDOW };
+/** @internal Used by tokenizer window tests. */
+export { slabify, CONTENT_TOKEN_WINDOW };

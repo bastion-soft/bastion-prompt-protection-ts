@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { slabify } from "../src/chunking.js";
 import {
   CONTENT_TOKEN_WINDOW,
+  DEFAULT_SLAB_CHARS,
   DEFAULT_TOKEN_OVERLAP,
-  MODEL_TOKEN_WINDOW,
   estimateWindowCount,
-} from "../src/config.js";
-import { BastionTokenizer } from "../src/models/tokenizer.js";
+  MODEL_TOKEN_WINDOW,
+} from "../src/constants.js";
+import { BastionTokenizer, slabify } from "../src/models/tokenizer.js";
 
 const TOKENIZER_DIR =
   "/home/mantas/.cache/huggingface/hub/models--bastionsoft--binary-bastion-prompt-protection-deberta-v3-xsmall-v1/snapshots/3a5bbe0e8eadf86213378e4806da42a1a3177df8";
@@ -26,6 +26,50 @@ function loadTokenizer(): BastionTokenizer | null {
 
 const tokenizer = loadTokenizer();
 const describeWithTokenizer = tokenizer ? describe : describe.skip;
+
+function collectSlabs(text: string, slabChars?: number): string[] {
+  return [...slabify(text, slabChars)];
+}
+
+describe("slabify", () => {
+  it("returns no slabs for empty input", () => {
+    expect(collectSlabs("")).toEqual([]);
+  });
+
+  it("tiles the input losslessly", () => {
+    const text = "hello world ".repeat(100);
+    expect(collectSlabs(text).join("")).toBe(text);
+  });
+
+  it("never exceeds the slab limit", () => {
+    const text = "a".repeat(5000);
+    for (const slab of collectSlabs(text, 512)) {
+      expect(slab.length).toBeLessThanOrEqual(512);
+    }
+  });
+
+  it("prefers breaking on whitespace when possible", () => {
+    const text = `${"word ".repeat(120)}tail`;
+    const slabs = collectSlabs(text, 256);
+    expect(slabs.join("")).toBe(text);
+    for (const slab of slabs.slice(0, -1)) {
+      expect(/\s/u.test(slab.at(-1) ?? "")).toBe(true);
+    }
+  });
+
+  it("hard-cuts whitespace-free runs", () => {
+    const text = "A".repeat(1000);
+    const slabs = collectSlabs(text, 512);
+    expect(slabs).toEqual(["A".repeat(512), "A".repeat(488)]);
+    expect(slabs.join("")).toBe(text);
+  });
+
+  it("defaults to DEFAULT_SLAB_CHARS", () => {
+    const text = "x".repeat(DEFAULT_SLAB_CHARS + 10);
+    const slabs = collectSlabs(text);
+    expect(slabs[0]?.length).toBe(DEFAULT_SLAB_CHARS);
+  });
+});
 
 describeWithTokenizer("BastionTokenizer.windows", () => {
   const tok = tokenizer as BastionTokenizer;
@@ -56,7 +100,7 @@ describeWithTokenizer("BastionTokenizer.windows", () => {
         200,
       );
     const whole = tok.encodeContent(prose);
-    const fromSlabs = [...slabify(prose)].flatMap((slab) => tok.encodeContent(slab));
+    const fromSlabs = tok.slabs(prose).flatMap((slab) => tok.encodeContent(slab));
     expect(fromSlabs).toEqual(whole);
   });
 
@@ -64,8 +108,8 @@ describeWithTokenizer("BastionTokenizer.windows", () => {
     const text = "word ".repeat(5000);
     const windows = [...tok.windows(text)];
     const last = windows.at(-1);
-    expect(last?.exact).toBe(true);
-    expect(last?.estimatedTotal).toBe(windows.length);
+    expect(last?.windowsTotalExact).toBe(true);
+    expect(last?.windowsTotal).toBe(windows.length);
   });
 
   it("covers the full token stream without gaps", () => {

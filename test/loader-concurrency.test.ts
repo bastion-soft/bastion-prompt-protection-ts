@@ -3,7 +3,7 @@
  * processes warming the same cold cache collide and the slower one fails with
  * `ENOENT … rename`. This shipped as a CI failure: three test files ran in
  * parallel, raced, and every model-dependent assertion failed with the guard
- * silently degraded to heuristics-only.
+ * throwing ModelUnavailableError.
  *
  * This asserts the loader survives concurrent warming. It uses the real cache,
  * so on a warm machine it verifies the no-op path; the value is in CI and on
@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { Guard } from "../src/index.js";
 
 describe("concurrent model loading", () => {
-  it("lets several Guards warm the same cache without any of them degrading", async () => {
+  it("lets several Guards warm the same cache without any of them throwing", async () => {
     const guards = [new Guard(), new Guard(), new Guard(), new Guard()];
 
     const results = await Promise.all(
@@ -21,7 +21,7 @@ describe("concurrent model loading", () => {
     );
 
     // Every one must have reached the model. A loser of the download race
-    // degrades to heuristics-only and reports a null modelVersion.
+    // throws ModelUnavailableError rather than returning a result.
     for (const [i, result] of results.entries()) {
       expect(guards[i]!.modelVersion).not.toBeNull();
       expect(result.stageReached).toBe("classifier");

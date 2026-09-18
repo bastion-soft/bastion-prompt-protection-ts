@@ -100,7 +100,7 @@ the expensive case** — every window is scanned. Compare `windowsScanned` with
 `windowsTotalExact` is false, `windowsTotal` is a density-based estimate.
 
 Constants are exported as `MODEL_TOKEN_WINDOW`, `CONTENT_TOKEN_WINDOW`,
-`DEFAULT_TOKEN_OVERLAP`, and `DEFAULT_SLAB_CHARS`.
+`DEFAULT_TOKEN_OVERLAP`, `DEFAULT_SLAB_CHARS`, and `DEFAULT_MAX_INPUT_CHARS`.
 
 > **On document content, raise the threshold.** The `0.5` default is calibrated
 > for chat prompts. On documents and tool results this model is materially more

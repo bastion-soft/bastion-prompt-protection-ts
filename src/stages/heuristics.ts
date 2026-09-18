@@ -1,4 +1,4 @@
-export interface HeuristicRule {
+interface HeuristicRule {
   pattern: RegExp;
   confidence: number;
 }
@@ -13,7 +13,7 @@ export interface HeuristicRule {
  * tokens) or use formatting cues the model wasn't trained on (fake
  * end-of-prompt delimiters).
  */
-export const RULES: readonly HeuristicRule[] = Object.freeze([
+const DEFAULT_RULES: readonly HeuristicRule[] = Object.freeze([
   // Chat template control tokens injected as user input. Case-SENSITIVE.
   {
     pattern: /<\|(im_start|im_end|system|user|assistant|endoftext)\|>|\[\/?(INST|SYS)\]|<<SYS>>/,
@@ -55,10 +55,7 @@ const BASE64_PAYLOAD_RE =
  */
 const SPACED_LETTERS_RE = /(?:\b[A-Za-z]\s){8,}[A-Za-z]\b/;
 
-/** Confidence score for structural obfuscation signals; 0.0 if none. */
-export function structuralScore(text: string): number {
-  // Zero-width characters in user prompts are almost always adversarial.
-  // Threshold of 3 catches obfuscation while tolerating one stray pasted char.
+function structuralScore(text: string): number {
   ZERO_WIDTH_RE.lastIndex = 0;
   const zeroWidth = text.match(ZERO_WIDTH_RE);
   if (zeroWidth !== null && zeroWidth.length >= 3) return 0.96;
@@ -68,10 +65,10 @@ export function structuralScore(text: string): number {
 }
 
 export class HeuristicsStage {
-  constructor(readonly rules: readonly HeuristicRule[] = RULES) {}
+  constructor(private readonly rules: readonly HeuristicRule[] = DEFAULT_RULES) {}
 
   /** Return the highest-confidence match score (0.0 if no match). */
-  run(text: string): number {
+  score(text: string): number {
     if (!text) return 0.0;
     let best = 0.0;
     for (const rule of this.rules) {

@@ -7,12 +7,24 @@ this project follows [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+- **Breaking:** Removed from the public barrel: `Guardable`, `RULES`,
+  `HeuristicRule`, `HeuristicsStage`, `ClassifierStage`, `ClassifierPrediction`,
+  `modelId`, `resolveConfig`, `MODEL_REGISTRY`, `NEUTRAL_RISK`,
+  `estimateWindowCount`, `DEFAULT_MAX_INPUT`.
 - **Breaking:** Removed the entire telemetry subsystem: `ReportingGuard`,
   `BackgroundReporter`, `MultiReporter`, `NoopReporter`, `buildReporter`,
   `buildTelemetryRecord`, `defaultReporter`, `telemetryConfigFromEnv`, and all
   related types. This package is an air-gapped security scanner — detection
   events are never transmitted anywhere. Removed optional OpenTelemetry and
   LangSmith peer dependencies.
+
+### Changed
+
+- **Breaking:** Renamed `DEFAULT_MAX_INPUT` → `DEFAULT_MAX_INPUT_CHARS`.
+- **Breaking:** `Guard.config` is now a frozen public snapshot without `hfToken`.
+- Internal refactor: shared types in `types.ts`, slimmer `index.ts` barrel,
+  `HeuristicsStage.score()` / `ClassifierStage.score()` naming, `OnnxModelLoader.load()`.
+- Fixed `VERSION` in `src/version.ts` to match `package.json` (enforced by test).
 
 ## [0.4.0] — 2026-09-17
 
